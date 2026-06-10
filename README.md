@@ -1,4 +1,4 @@
-# OpenChat2Skill
+# Chat2Skill
 
 Automatically learn reusable skills from your coding-agent conversations.
 
@@ -59,7 +59,7 @@ Install as a plugin (marketplace or local path). The manifest at
 ### 2b. Codex
 
 ```bash
-git clone https://github.com/chat2skill/openchat2skill ~/plugins/chat2skill
+git clone https://github.com/chat2skill/Chat2Skill ~/plugins/chat2skill
 cd ~/plugins/chat2skill && ./install.sh
 ```
 

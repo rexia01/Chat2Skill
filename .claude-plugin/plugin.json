@@ -5,7 +5,7 @@
   "author": {
     "name": "Chat2Skill contributors"
   },
-  "homepage": "https://github.com/chat2skill/openchat2skill",
+  "homepage": "https://github.com/chat2skill/Chat2Skill",
   "hooks": "./hooks/hooks.json",
   "skills": "./skills/"
 }
