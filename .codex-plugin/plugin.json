@@ -1,0 +1,19 @@
+{
+  "name": "chat2skill",
+  "version": "0.1.0",
+  "description": "Capture coding-agent conversations into Chat2Skill and retrieve learned skills for future prompts.",
+  "author": {
+    "name": "Chat2Skill contributors"
+  },
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "interface": {
+    "displayName": "Chat2Skill",
+    "shortDescription": "Learn and retrieve skills from your daily agent conversations.",
+    "longDescription": "Chat2Skill captures conversations after each session, sends them to the Chat2Skill cloud extraction API (using your own LLM api key), stores the learned skills locally under ~/.chat2skill, and injects relevant skills into new conversations.",
+    "developerName": "Chat2Skill contributors",
+    "category": "Productivity",
+    "capabilities": ["skills", "hooks"],
+    "defaultPrompt": "Use Chat2Skill to update or retrieve learned skills from my conversations."
+  }
+}
