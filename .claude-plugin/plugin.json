@@ -1,10 +1,22 @@
 {
   "name": "chat2skill",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Automatically learn reusable skills from your coding-agent conversations and inject them into future sessions.",
   "author": {
     "name": "Chat2Skill contributors"
   },
   "homepage": "https://github.com/rexia01/Chat2Skill",
-  "skills": "./skills/"
+  "repository": "https://github.com/rexia01/Chat2Skill",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "skills",
+    "hooks",
+    "memory",
+    "workflow",
+    "learning"
+  ],
+  "skills": [
+    "./skills/"
+  ]
 }
