@@ -100,8 +100,9 @@ For local development, load the plugin for one session:
 claude --plugin-dir ~/plugins/chat2skill
 ```
 
-The manifest at `.claude-plugin/plugin.json` registers the hooks
-automatically via `${CLAUDE_PLUGIN_ROOT}` — no path setup needed.
+Claude Code loads the standard `hooks/hooks.json` file automatically,
+and `${CLAUDE_PLUGIN_ROOT}` resolves to the installed plugin directory —
+no path setup needed.
 
 ### 2b. Codex
 

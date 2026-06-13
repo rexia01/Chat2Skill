@@ -1,11 +1,10 @@
 {
   "name": "chat2skill",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Automatically learn reusable skills from your coding-agent conversations and inject them into future sessions.",
   "author": {
     "name": "Chat2Skill contributors"
   },
   "homepage": "https://github.com/rexia01/Chat2Skill",
-  "hooks": "./hooks/hooks.json",
   "skills": "./skills/"
 }

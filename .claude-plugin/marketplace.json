@@ -9,7 +9,15 @@
       "name": "chat2skill",
       "source": ".",
       "description": "Automatically learn reusable skills from Claude Code conversations and inject them into future sessions.",
-      "version": "0.1.0",
+      "version": "0.1.1",
+      "category": "development",
+      "tags": [
+        "skills",
+        "hooks",
+        "memory",
+        "workflow",
+        "learning"
+      ],
       "author": {
         "name": "Chat2Skill contributors"
       },
