@@ -16,7 +16,7 @@ from typing import Optional
 DATA_HOME = Path(os.environ.get("CHAT2SKILL_HOME") or Path.home() / ".chat2skill")
 CONFIG_PATH = DATA_HOME / "config.json"
 
-DEFAULT_API_URL = "https://api.chat2skill.dev"
+DEFAULT_API_URL = "https://api.chat2skill.com"
 
 
 def load_config() -> dict:

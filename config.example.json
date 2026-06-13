@@ -1,5 +1,5 @@
 {
-  "api_url": "https://api.chat2skill.dev",
+  "api_url": "https://api.chat2skill.com",
   "llm": {
     "api_key": "",
     "base_url": null,

@@ -46,9 +46,44 @@ cp config.example.json ~/.chat2skill/config.json
 # edit ~/.chat2skill/config.json: set llm.api_key (and base_url/model)
 ```
 
-Environment variables override the file: `CHAT2SKILL_API_URL`,
-`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `CHAT2SKILL_MODEL`,
-`CHAT2SKILL_USER_ID`, `CHAT2SKILL_HOME`.
+Use one config file. For OpenAI, write `~/.chat2skill/config.json` like this:
+
+```json
+{
+  "api_url": "https://api.chat2skill.com",
+  "user_id": "alice",
+  "llm": {
+    "api_key": "your-openai-compatible-api-key",
+    "base_url": null,
+    "model": "gpt-4.1"
+  }
+}
+```
+
+For DeepSeek, write `~/.chat2skill/config.json` like this:
+
+```json
+{
+  "api_url": "https://api.chat2skill.com",
+  "user_id": "alice",
+  "llm": {
+    "api_key": "your-deepseek-api-key",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-chat"
+  }
+}
+```
+
+These are the equivalent environment variables. You only need environment
+variables if you prefer shell config or need to override the JSON file.
+
+| Environment variable | JSON key | Default | Description |
+| --- | --- | --- | --- |
+| `CHAT2SKILL_API_URL` | `api_url` | `https://api.chat2skill.com` | Chat2Skill API endpoint used for extraction and project-skill generation. |
+| `OPENAI_API_KEY` | `llm.api_key` | unset | Your OpenAI-compatible LLM API key. If unset, extraction falls back to lower-quality heuristics. |
+| `OPENAI_BASE_URL` | `llm.base_url` | `null` | Optional OpenAI-compatible base URL. Use `null` for OpenAI; use `https://api.deepseek.com` for DeepSeek. |
+| `CHAT2SKILL_MODEL` | `llm.model` | `gpt-4.1` | Model used for detect/analyze/generate/judge calls. |
+| `CHAT2SKILL_USER_ID` | `user_id` | system username | Base namespace for local skills and profile data. Project-specific skills use `<user>__project__<slug>`. |
 
 ### 2a. Claude Code
 
