@@ -3,14 +3,16 @@
   "owner": {
     "name": "Chat2Skill contributors"
   },
-  "description": "Marketplace for Chat2Skill Claude Code plugins.",
+  "metadata": {
+    "description": "Marketplace for Chat2Skill Claude Code plugins.",
+    "version": "0.1.1"
+  },
   "plugins": [
     {
       "name": "chat2skill",
-      "source": ".",
+      "source": "./",
       "description": "Automatically learn reusable skills from Claude Code conversations and inject them into future sessions.",
       "version": "0.1.1",
-      "category": "development",
       "tags": [
         "skills",
         "hooks",
