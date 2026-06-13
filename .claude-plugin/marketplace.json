@@ -1,0 +1,19 @@
+{
+  "name": "chat2skill",
+  "owner": {
+    "name": "Chat2Skill contributors"
+  },
+  "description": "Marketplace for Chat2Skill Claude Code plugins.",
+  "plugins": [
+    {
+      "name": "chat2skill",
+      "source": ".",
+      "description": "Automatically learn reusable skills from Claude Code conversations and inject them into future sessions.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Chat2Skill contributors"
+      },
+      "homepage": "https://github.com/rexia01/Chat2Skill"
+    }
+  ]
+}

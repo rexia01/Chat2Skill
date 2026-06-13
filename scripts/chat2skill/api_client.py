@@ -15,6 +15,7 @@ from typing import Optional
 
 SCHEMA_VERSION = "1"
 DEFAULT_TIMEOUT = 180
+USER_AGENT = "Chat2Skill/0.1 (+https://github.com/rexia01/Chat2Skill)"
 
 
 class ApiError(Exception):
@@ -36,7 +37,10 @@ def _post_json(url: str, payload: dict, timeout: int) -> dict:
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
         method="POST",
     )
     try:

@@ -87,14 +87,26 @@ variables if you prefer shell config or need to override the JSON file.
 
 ### 2a. Claude Code
 
-Install as a plugin (marketplace or local path). The manifest at
-`.claude-plugin/plugin.json` registers the hooks automatically via
-`${CLAUDE_PLUGIN_ROOT}` — no path setup needed.
+Install from the Chat2Skill marketplace:
+
+```bash
+claude plugin marketplace add https://github.com/rexia01/Chat2Skill
+claude plugin install chat2skill@chat2skill
+```
+
+For local development, load the plugin for one session:
+
+```bash
+claude --plugin-dir ~/plugins/chat2skill
+```
+
+The manifest at `.claude-plugin/plugin.json` registers the hooks
+automatically via `${CLAUDE_PLUGIN_ROOT}` — no path setup needed.
 
 ### 2b. Codex
 
 ```bash
-git clone https://github.com/chat2skill/Chat2Skill ~/plugins/chat2skill
+git clone https://github.com/rexia01/Chat2Skill.git ~/plugins/chat2skill
 cd ~/plugins/chat2skill && ./install.sh
 ```
 
