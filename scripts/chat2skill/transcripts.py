@@ -3,6 +3,7 @@
 Handles two JSONL layouts:
 - Codex rollouts: {"type": "response_item", "payload": {"role", "content"}}
 - Claude Code transcripts: {"type": "user"|"assistant", "message": {"role", "content"}}
+- Cursor agent transcripts: {"role": "user"|"assistant", "message": {"content": ...}}
 
 Noise (agent instructions, environment banners, system reminders) is
 stripped before anything is sent to the cloud.
@@ -72,6 +73,13 @@ def _message_from_record(record: dict) -> Optional[tuple[str, str]]:
             return None
         return role, _flatten_content(payload.get("content", ""))
 
+    role = record.get("role")  # Cursor agent transcript
+    if role in ("user", "assistant"):
+        payload = record.get("message", {})
+        if isinstance(payload, dict):
+            return role, _flatten_content(payload.get("content", ""))
+        return role, _flatten_content(payload)
+
     return None
 
 
@@ -101,12 +109,34 @@ def clean_message_content(role: str, content: str) -> str:
     return text
 
 
-def find_latest_session() -> Optional[Path]:
+def find_latest_session(project_dir: str = "") -> Optional[Path]:
     """Fallback when the hook input carries no transcript path."""
     candidates: List[Path] = []
-    for root in (Path.home() / ".codex" / "sessions", Path.home() / ".claude" / "projects"):
+    cursor_root = Path.home() / ".cursor" / "projects"
+    cursor_workspace = _cursor_workspace_transcripts(cursor_root, project_dir)
+    roots = [
+        Path.home() / ".codex" / "sessions",
+        Path.home() / ".claude" / "projects",
+    ]
+    if cursor_workspace is not None:
+        roots.insert(0, cursor_workspace)
+    elif cursor_root.exists():
+        roots.append(cursor_root)
+    for root in roots:
         if root.exists():
             candidates.extend(p for p in root.rglob("*.jsonl") if p.is_file())
     if not candidates:
         return None
     return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _cursor_workspace_transcripts(cursor_root: Path, project_dir: str) -> Optional[Path]:
+    if not project_dir or not cursor_root.exists():
+        return None
+    try:
+        raw = str(Path(project_dir).expanduser().resolve())
+    except OSError:
+        raw = str(Path(project_dir).expanduser())
+    slug = raw.strip("/").replace("/", "-")
+    transcript_dir = cursor_root / slug / "agent-transcripts"
+    return transcript_dir if transcript_dir.exists() else None

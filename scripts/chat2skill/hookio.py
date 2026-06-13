@@ -1,6 +1,6 @@
 """Hook input/output helpers shared by all hook entry points.
 
-Works with both Codex and Claude Code hook payloads: key names differ
+Works with Codex, Claude Code, and Cursor hook payloads: key names differ
 between agents, so values are located by trying known aliases anywhere
 in the input document.
 """
@@ -56,9 +56,15 @@ def project_dir_from_input(data: dict[str, Any]) -> str:
     env_value = (
         os.environ.get("CODEX_PROJECT_DIR")
         or os.environ.get("CLAUDE_PROJECT_DIR")
+        or os.environ.get("CURSOR_PROJECT_DIR")
         or os.environ.get("PWD")
         or ""
     )
+    workspace_roots = data.get("workspace_roots")
+    if isinstance(workspace_roots, list):
+        for root in workspace_roots:
+            if isinstance(root, str) and root.strip():
+                return root.strip()
     value = first_string(
         data,
         (
@@ -94,7 +100,7 @@ def transcript_path_from_input(data: dict[str, Any]) -> Optional[Path]:
         path = Path(value).expanduser()
         if path.exists():
             return path
-    return find_latest_session()
+    return find_latest_session(project_dir_from_input(data))
 
 
 def prompt_from_input(data: dict[str, Any]) -> str:
@@ -104,6 +110,7 @@ def prompt_from_input(data: dict[str, Any]) -> str:
 def json_hook_output(additional_context: str) -> None:
     json.dump(
         {
+            "additional_context": additional_context,
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": additional_context,

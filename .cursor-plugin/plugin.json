@@ -1,0 +1,30 @@
+{
+  "name": "chat2skill",
+  "displayName": "Chat2Skill",
+  "version": "0.1.3",
+  "description": "Automatically learn reusable skills from coding-agent conversations and retrieve them for future sessions.",
+  "author": {
+    "name": "Chat2Skill contributors"
+  },
+  "homepage": "https://github.com/rexia01/Chat2Skill",
+  "repository": "https://github.com/rexia01/Chat2Skill",
+  "license": "MIT",
+  "keywords": [
+    "cursor-plugin",
+    "skills",
+    "hooks",
+    "memory",
+    "workflow",
+    "learning"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "skills",
+    "hooks",
+    "memory",
+    "workflow",
+    "learning"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/cursor-hooks.json"
+}

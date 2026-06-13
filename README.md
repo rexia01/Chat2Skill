@@ -7,8 +7,9 @@ preferences, and constraints, distills them into `SKILL.md` files, and
 injects the relevant ones into your future sessions — so your agent stops
 repeating the same mistakes.
 
-Works with **Claude Code**, **Codex**, and any agent that supports
-prompt/stop hooks or can run a CLI.
+Works best with **Claude Code**, **Codex**, and **Cursor**. Other agents
+can use Chat2Skill when they support lifecycle hooks or can run the
+included CLI scripts.
 
 ## How it works
 
@@ -114,7 +115,38 @@ cd ~/plugins/chat2skill && ./install.sh
 `install.sh` writes `hooks.json` with absolute paths for your clone
 location and creates the config file if missing.
 
-### 2c. Other agents
+### 2c. Cursor
+
+Cursor supports native plugins with `.cursor-plugin/plugin.json`.
+
+In Cursor:
+
+1. Open **Settings -> Plugins**.
+2. Paste this repository URL into **Search or Paste Link**:
+
+```text
+https://github.com/rexia01/Chat2Skill
+```
+
+The Cursor plugin uses:
+
+- `hooks/cursor-hooks.json` for Cursor-format hooks.
+- `${CURSOR_PLUGIN_ROOT}` for installed plugin paths.
+- `sessionStart` to provide the current project summary when Cursor
+  accepts hook context.
+- `stop` to learn from the newest Cursor agent transcript under
+  `~/.cursor/projects/*/agent-transcripts/`.
+
+Important Cursor limitation: Cursor plugins do support hooks and skills,
+but Cursor's `beforeSubmitPrompt` hook currently cannot inject dynamic
+per-prompt context into the model. For prompt-specific retrieval in
+Cursor, use the `chat2skill` skill or run:
+
+```bash
+python3 scripts/retrieve_for_prompt.py "your current task"
+```
+
+### 2d. Other agents
 
 If your agent supports hooks, point them at:
 - prompt-submit: `python3 <plugin-root>/scripts/hook_user_prompt_submit.py`
@@ -129,6 +161,32 @@ python3 scripts/update_from_transcript.py --latest
 # before a task: print a prompt snippet with relevant skills
 python3 scripts/retrieve_for_prompt.py "refactor the auth module"
 ```
+
+## Agent Support
+
+Chat2Skill needs two capabilities for the full automatic loop:
+
+- **Learn after a session:** a stop/session-end hook that can run
+  `scripts/hook_stop.py`.
+- **Retrieve before work:** a prompt/session-start hook or skill workflow
+  that can inject or load the output of `scripts/retrieve_for_prompt.py`.
+
+| Agent | Current support | Notes |
+| --- | --- | --- |
+| Claude Code | Native plugin marketplace | Full automatic support through `.claude-plugin/marketplace.json`, the `chat2skill` skill, and standard `hooks/hooks.json` with `UserPromptSubmit` + `Stop`. |
+| Codex | Native plugin/local installer | Full automatic support through `.codex-plugin/plugin.json` and `install.sh`, which writes absolute hook paths for the local clone. |
+| Cursor | Native plugin | Supported through `.cursor-plugin/plugin.json`, the `chat2skill` skill, `sessionStart`, and `stop`. Stop learning works from Cursor transcripts. Dynamic per-prompt context injection is limited by Cursor's current `beforeSubmitPrompt` hook behavior. |
+| Gemini CLI | Extension/hooks capable | Use the generic hook commands or CLI scripts. A dedicated Gemini extension manifest is not included yet. |
+| Google Antigravity | Plugin/hooks capable | Use the generic hook commands or CLI scripts. A dedicated Antigravity plugin manifest is not included yet. |
+| OpenCode | Plugin/hooks capable | Requires a small JS/TS plugin adapter or direct hook commands. No native OpenCode manifest is included yet. |
+| GitHub Copilot CLI | Hooks capable | Local CLI hooks can call Chat2Skill. Copilot VS Code Chat and cloud/ephemeral agents are not equivalent to local persistent hooks. |
+| Kimi Code CLI | Skills/hooks capable | Configure `UserPromptSubmit`/`Stop` equivalents to call the hook scripts, or use the skill/CLI workflow. |
+| Windsurf / Cascade | Hooks capable | Configure workspace/user hooks to call the hook scripts. No native Chat2Skill marketplace plugin is included yet. |
+| Kiro | Hooks/export capable | Use hooks where available, or export/process transcripts manually with `update_from_transcript.py`. |
+| Continue | Manual/partial | Rules, prompts, and MCP are useful, but no verified lifecycle hook path for the full Chat2Skill loop is included. |
+| Cline | Manual/partial | Skills/rules/MCP can carry instructions, but no verified full lifecycle hook path is included. |
+| Aider | Manual CLI | Use `update_from_transcript.py` and `retrieve_for_prompt.py`; no native plugin/hook integration is included. |
+| Roo Code | Manual/legacy | Use the CLI scripts only unless your local fork exposes compatible hooks. |
 
 ## Requirements
 
