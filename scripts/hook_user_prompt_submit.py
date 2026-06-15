@@ -17,6 +17,7 @@ from chat2skill.hookio import (
     prompt_from_input,
     read_hook_input,
 )
+from chat2skill.response_guard import reset_guard_state
 from chat2skill.retrieval import SkillRetriever
 from chat2skill.runner import PROJECT_SUMMARY_FILE, PROJECT_SUMMARY_NAME
 from chat2skill.storage import SKILL_DIR, init_db, load_skills, record_skill_usage
@@ -27,6 +28,7 @@ def main() -> int:
     prompt = prompt_from_input(data)
     project_dir = project_dir_from_input(data)
     scoped_user_id = project_user_id(project_dir)
+    reset_guard_state(scoped_user_id)
     log_event(
         "UserPromptSubmit.start",
         project_dir=project_dir,

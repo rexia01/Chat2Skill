@@ -39,6 +39,7 @@ class Skill:
     quality_notes: List[str] = field(default_factory=list)
     judge_rationale: str = ""
     memory_items: List[dict] = field(default_factory=list)
+    response_guard: dict = field(default_factory=dict)
 
     def refresh_embedding_text(self) -> None:
         self.embedding_text = "\n".join(

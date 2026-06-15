@@ -1,16 +1,15 @@
 {
   "name": "chat2skill",
   "version": "0.1.3",
-  "description": "Automatically learn reusable skills from coding-agent conversations and retrieve them for future sessions.",
+  "description": "Automatically learn reusable skills from coding-agent conversations, retrieve them for future sessions, and enforce learned hard response constraints.",
   "author": {
     "name": "Chat2Skill contributors"
   },
   "skills": "./skills/",
-  "hooks": "./hooks.json",
   "interface": {
     "displayName": "Chat2Skill",
     "shortDescription": "Learn and retrieve skills from your daily agent conversations.",
-    "longDescription": "Chat2Skill captures conversations after each session, sends them to the Chat2Skill cloud extraction API (using your own LLM api key), stores the learned skills locally under ~/.chat2skill, and injects relevant skills into new conversations.",
+    "longDescription": "Chat2Skill captures conversations after each session, sends them to the Chat2Skill cloud extraction API (using your own LLM api key), stores the learned skills locally under ~/.chat2skill, injects relevant skills into new conversations, and uses a Stop response guard to force learned hard wording constraints before a turn ends.",
     "developerName": "Chat2Skill contributors",
     "category": "Productivity",
     "capabilities": ["Instructions", "Lifecycle hooks"],

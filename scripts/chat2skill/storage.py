@@ -625,7 +625,82 @@ def _skill_from_record(row) -> Skill:
         parent_skill=row[21],
         quality_notes=notes,
         judge_rationale=row[23] or "",
+        response_guard=_response_guard_from_content(row[2] or ""),
     )
     if not skill.embedding_text:
         skill.refresh_embedding_text()
     return skill
+
+
+def _response_guard_from_content(content: str) -> dict:
+    if not content.startswith("---"):
+        return {}
+    end = content.find("\n---", 3)
+    if end == -1:
+        return {}
+    frontmatter = content[3:end]
+    lines = frontmatter.splitlines()
+    guard_lines: list[str] = []
+    collecting = False
+    for line in lines:
+        if re.match(r"^response_guard\s*:", line):
+            collecting = True
+            guard_lines.append(line)
+            continue
+        if collecting:
+            if line and not line.startswith((" ", "\t", "-")):
+                break
+            guard_lines.append(line)
+    if not guard_lines:
+        return {}
+
+    enabled = any(re.match(r"\s*enabled\s*:\s*true\s*$", line, re.IGNORECASE) for line in guard_lines)
+    mode = "forbidden_terms"
+    requires_evidence = False
+    allow_evidence_gap_disclosure = False
+    lists: dict[str, list[str]] = {
+        "forbidden_terms": [],
+        "evidence_markers": [],
+        "gap_markers": [],
+    }
+    current_list = ""
+    for line in guard_lines:
+        mode_match = re.match(r"\s*mode\s*:\s*(.+?)\s*$", line)
+        if mode_match:
+            mode = mode_match.group(1).strip().strip("\"'") or mode
+            continue
+        if re.match(r"\s*requires_evidence\s*:\s*true\s*$", line, re.IGNORECASE):
+            requires_evidence = True
+            continue
+        if re.match(r"\s*allow_evidence_gap_disclosure\s*:\s*true\s*$", line, re.IGNORECASE):
+            allow_evidence_gap_disclosure = True
+            continue
+        list_match = re.match(r"\s*(forbidden_terms|evidence_markers|gap_markers)\s*:", line)
+        if list_match:
+            current_list = list_match.group(1)
+            continue
+        if current_list:
+            match = re.match(r"\s*-\s*(.+?)\s*$", line)
+            if match:
+                term = match.group(1).strip().strip("\"'")
+                if term:
+                    lists[current_list].append(term)
+            elif line and not line.startswith((" ", "\t", "-")):
+                break
+    terms = lists["forbidden_terms"]
+    if not enabled or not terms:
+        return {}
+    guard = {
+        "enabled": True,
+        "mode": mode,
+        "forbidden_terms": terms,
+    }
+    if requires_evidence:
+        guard["requires_evidence"] = True
+    if allow_evidence_gap_disclosure:
+        guard["allow_evidence_gap_disclosure"] = True
+    if lists["evidence_markers"]:
+        guard["evidence_markers"] = lists["evidence_markers"]
+    if lists["gap_markers"]:
+        guard["gap_markers"] = lists["gap_markers"]
+    return guard

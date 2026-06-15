@@ -16,7 +16,9 @@ included CLI scripts.
 ```
 your machine                                Chat2Skill cloud
 ─────────────────────────────────────       ─────────────────────────
-Stop hook ──► queue ──► worker ───────────► POST /v1/extract
+Stop hook ──► response guard ──► continue on hard-rule violation
+     │
+     └────► queue ──► worker ─────────────► POST /v1/extract
                           │                 (stateless algorithm,
    ~/.chat2skill/ ◄───────┘                  your own LLM api key)
    skills + profile + history     ◄──────── skill + profile + replay
@@ -31,6 +33,14 @@ UserPromptSubmit hook ◄── local retrieval   (project summary)
   (OpenAI-compatible, e.g. OpenAI/DeepSeek). The key is sent with each
   request, used in memory, never persisted or logged server-side.
   Without a key, the server falls back to lower-quality heuristics.
+- **Response guard.** When a project summary contains a high-confidence
+  deterministic wording constraint, the Stop hook checks the final assistant
+  message locally. The learned rule is evidence-based: verified facts must use
+  definitive wording; evidence gaps must name the missing evidence and the next
+  validation step. The guard only reads explicit `response_guard` frontmatter,
+  never prose examples or code identifiers. The default guard mode is
+  `adaptive`: repeated violations are throttled with a growing cooldown and
+  logged without blocking every turn.
 - **Cost.** A typical extraction makes ~4 LLM calls on your key
   (detect, analyze, generate, judge); replay validation against your
   history adds up to 5 more. Conversations are windowed (last ~40
@@ -85,6 +95,7 @@ variables if you prefer shell config or need to override the JSON file.
 | `OPENAI_BASE_URL` | `llm.base_url` | `null` | Optional OpenAI-compatible base URL. Use `null` for OpenAI; use `https://api.deepseek.com` for DeepSeek. |
 | `CHAT2SKILL_MODEL` | `llm.model` | `gpt-4.1` | Model used for detect/analyze/generate/judge calls. |
 | `CHAT2SKILL_USER_ID` | `user_id` | system username | Base namespace for local skills and profile data. Project-specific skills use `<user>__project__<slug>`. |
+| `CHAT2SKILL_RESPONSE_GUARD` | unset | `adaptive` | Stop response guard mode. Use `adaptive`, `block-once`, `strict`, `warn-only`, or `off`. Structured `response_guard.mode: evidence_based_terms` allows explicit evidence-gap disclosure while still blocking unsupported hedging. |
 
 ### 2a. Claude Code
 
@@ -161,7 +172,8 @@ adds relevant snippets to the system prompt.
 
 If your agent supports hooks, point them at:
 - prompt-submit: `python3 <plugin-root>/scripts/hook_user_prompt_submit.py`
-- session-end: `python3 <plugin-root>/scripts/hook_stop.py`
+- session-end learning: `python3 <plugin-root>/scripts/hook_stop.py`
+- session-end response guard: `python3 <plugin-root>/scripts/hook_stop_response_guard.py`
 
 No hooks? Use the CLIs:
 
@@ -191,12 +203,17 @@ Chat2Skill needs two capabilities for the full automatic loop:
   `scripts/hook_stop.py`.
 - **Retrieve before work:** a prompt/session-start hook or skill workflow
   that can inject or load the output of `scripts/retrieve_for_prompt.py`.
+- **Enforce hard wording rules:** a stop/session-end hook with access to
+  the final assistant message that can run `scripts/hook_stop_response_guard.py`.
+  The default `adaptive` mode prevents repeated Stop-hook rewrite loops, and
+  evidence-based rules distinguish verified conclusions from missing-evidence
+  disclosures.
 
 | Agent | Current support | Notes |
 | --- | --- | --- |
-| Claude Code | Native plugin marketplace | Full automatic support through `.claude-plugin/marketplace.json`, the `chat2skill` skill, and standard `hooks/hooks.json` with `UserPromptSubmit` + `Stop`. |
-| Codex | Native plugin/local installer | Full automatic support through `.codex-plugin/plugin.json` and `install.sh`, which writes absolute hook paths for the local clone. |
-| Cursor | Native plugin + project rule | Supported through `.cursor-plugin/plugin.json`, `hooks/cursor-hooks.json`, `.cursor/rules/chat2skill.mdc`, and the `chat2skill` skill. Stop learning works from Cursor transcripts. Dynamic per-prompt context injection is limited by Cursor's current `beforeSubmitPrompt` hook behavior. |
+| Claude Code | Native plugin marketplace | Full automatic support through `.claude-plugin/marketplace.json`, the `chat2skill` skill, and standard `hooks/hooks.json` with `UserPromptSubmit` + `Stop` learning + Stop response guard. |
+| Codex | Native plugin/local installer | Full automatic support through `.codex-plugin/plugin.json` and `install.sh`, which writes absolute hook paths for the local clone, including the Stop response guard. |
+| Cursor | Native plugin + project rule | Supported through `.cursor-plugin/plugin.json`, `hooks/cursor-hooks.json`, `.cursor/rules/chat2skill.mdc`, and the `chat2skill` skill. Stop learning works from Cursor transcripts, and the response guard runs when Cursor provides final response text. Dynamic per-prompt context injection is limited by Cursor's current `beforeSubmitPrompt` hook behavior. |
 | OpenCode | Server plugin + command | `opencode.json` loads `.opencode/plugins/chat2skill.mjs`, which calls `retrieve_for_prompt.py` and appends relevant snippets to the system prompt. `.opencode/command/chat2skill.md` adds a manual command prompt. |
 | GitHub Copilot | Repository instructions | `.github/copilot-instructions.md` tells Copilot how to run Chat2Skill CLI retrieval/update. Local Copilot CLI hooks can also call Chat2Skill; cloud/ephemeral agents are not equivalent to local persistent hooks. |
 | Kimi Code CLI | Skills/hooks capable | Configure `UserPromptSubmit`/`Stop` equivalents to call the hook scripts, or use the skill/CLI workflow. |
@@ -225,7 +242,7 @@ adapter map.
 ├── config.json                  # endpoint + your LLM credentials
 ├── chat2skill.db                # conversations, skills, profile
 ├── skills/<user>/<name>/SKILL.md
-├── skills/<user>/PROJECT_SKILL.md   # injected before each conversation
+├── skills/<user>/PROJECT_SKILL.md   # injected before each conversation and read by response guard
 └── hook-events.log
 ```
 

@@ -8,9 +8,9 @@ load the same behavior in each coding agent.
 
 | Host | Files | Notes |
 | --- | --- | --- |
-| Claude Code | `.claude-plugin/`, `hooks/hooks.json`, `skills/` | Full plugin marketplace install with the `chat2skill` skill and `UserPromptSubmit` + `Stop` hooks. |
-| Codex | `.codex-plugin/plugin.json`, `install.sh`, generated `hooks.json`, `skills/` | Plugin/local install with absolute hook paths for the checkout. |
-| Cursor | `.cursor-plugin/`, `hooks/cursor-hooks.json`, `.cursor/rules/chat2skill.mdc` | Native plugin plus always-on project rule. `stop` learns from Cursor transcripts; prompt-specific retrieval should use the skill or CLI because Cursor's current `beforeSubmitPrompt` hook does not inject dynamic context. |
+| Claude Code | `.claude-plugin/`, `hooks/hooks.json`, `skills/` | Full plugin marketplace install with the `chat2skill` skill, `UserPromptSubmit`, Stop learning, and Stop response guard hooks. |
+| Codex | `.codex-plugin/plugin.json`, `install.sh`, generated `hooks.json`, `skills/` | Plugin/local install with absolute hook paths for the checkout, including Stop learning and Stop response guard. |
+| Cursor | `.cursor-plugin/`, `hooks/cursor-hooks.json`, `.cursor/rules/chat2skill.mdc` | Native plugin plus always-on project rule. `stop` learns from Cursor transcripts and runs the response guard when Cursor provides final response text; prompt-specific retrieval should use the skill or CLI because Cursor's current `beforeSubmitPrompt` hook does not inject dynamic context. |
 | OpenCode | `opencode.json`, `.opencode/plugins/chat2skill.mjs`, `.opencode/command/chat2skill.md` | Server plugin calls `retrieve_for_prompt.py` and appends relevant snippets to the system prompt. |
 | GitHub Copilot | `.github/copilot-instructions.md` | Repository instruction file that tells Copilot how to call the Chat2Skill CLI. |
 | Windsurf | `.windsurf/rules/chat2skill.md` | Project rule for Cascade/Windsurf. |
@@ -29,5 +29,6 @@ project instructions, keep its copied rule text aligned with `AGENTS.md`.
 - `skills/chat2skill/SKILL.md`: manual update/retrieve workflow.
 - `scripts/hook_user_prompt_submit.py`: prompt/session-start retrieval hook.
 - `scripts/hook_stop.py`: session-end learning hook.
+- `scripts/hook_stop_response_guard.py`: session-end final-message guard for hard wording constraints.
 - `scripts/retrieve_for_prompt.py`: manual or plugin-driven retrieval.
 - `scripts/update_from_transcript.py`: manual transcript processing.
