@@ -1,15 +1,119 @@
 # Chat2Skill
 
-Automatically learn reusable skills from your coding-agent conversations.
+Automatically learn reusable skills from your assistant conversations.
 
 After each session, Chat2Skill analyzes the conversation for corrections,
 preferences, and constraints, distills them into `SKILL.md` files, and
 injects the relevant ones into your future sessions — so your agent stops
-repeating the same mistakes.
+repeating the same mistakes. It is domain-general: coding workflows are the
+first-class integration target, while the same mechanism works for support,
+research, writing, operations, sales, education, and other assistant domains
+that produce usable transcripts.
 
 Works best with **Claude Code**, **Codex**, and **Cursor**. Other agents
 can use Chat2Skill when they support lifecycle hooks or can run the
 included CLI scripts.
+
+
+## What the Algorithm Produces
+
+Chat2Skill extracts two levels of reusable guidance:
+
+- **Atomized skills**: focused `SKILL.md` files for one interaction preference,
+  procedure, constraint, success pattern, or failure pattern.
+- **Project skill**: a synthesized `PROJECT_SKILL.md` that merges active
+  atomized skills into a compact project-level instruction file.
+
+A skill is not meant to remember one transcript. It captures a generalizable
+behavior that would change future assistant behavior across similar situations.
+
+## Core Concepts
+
+| Concept | Meaning |
+| --- | --- |
+| Conversation | Recent assistant/user messages for one session. Long sessions are trimmed to the latest analysis window. |
+| Signal | Evidence that something should be learned: correction, explicit constraint, negative feedback, or stable behavioral preference. |
+| Analysis | A structured diagnosis of what went wrong or what worked, including failure type, root cause, confidence, and proposed action. |
+| Proposal | The create/edit/discard decision for a skill candidate. |
+| Memory item | Evidence extracted before materializing a skill, such as failure cause, failure memory, success, or constraint. |
+| Skill | A validated, actionable `SKILL.md` with metadata such as confidence, evidence count, language, replay score, and status. |
+| Response guard | Optional frontmatter policy for hard wording constraints, such as evidence-based deterministic wording. |
+
+## Learning Loop
+
+```text
++---------------------------------------------------------+
+| 1. Retrieve active skills for the next assistant session |
++---------------------------+-----------------------------+
+                            |
+                            v
++---------------------------------------------------------+
+| 2. Inject relevant skills / PROJECT_SKILL.md into prompt |
++---------------------------+-----------------------------+
+                            |
+                            v
++---------------------------------------------------------+
+| 3. Assistant works; user accepts, corrects, or constrains |
++---------------------------+-----------------------------+
+                            |
+                            v
++---------------------------------------------------------+
+| 4. Extract learning signals at session end               |
++---------------------------+-----------------------------+
+                            |
+                            v
++---------------------------------------------------------+
+| 5. Create / edit / discard atomized skill candidates     |
++---------------------------+-----------------------------+
+                            |
+                            v
++---------------------------------------------------------+
+| 6. Validate, replay, merge, and store active skills      |
++---------------------------+-----------------------------+
+                            |
+                            v
++---------------------------------------------------------+
+| 7. Rebuild PROJECT_SKILL.md and update user profile      |
++---------------------------+-----------------------------+
+                            |
+                            +------------- back to step 1
+```
+
+The algorithm is a feedback loop, not a one-shot workflow. Each completed
+session can change the skill bank; the next session retrieves from that updated
+bank; later user feedback reinforces, edits, rejects, or ages out earlier
+skills.
+
+There is still a single extraction pass inside the loop. That pass is:
+
+```text
+recent conversation + existing skills + profile
+  -> detect signals
+  -> analyze root cause
+  -> propose create/edit/discard
+  -> generate SKILL.md
+  -> quality gate
+  -> judge
+  -> optional replay
+  -> active/rejected/no-action result
+```
+
+The LLM path uses Proposer, Generator, and Judge style stages. When no LLM is
+available, the loop still runs with keyword detection and template-based
+generation.
+
+## Loop Layers
+
+Chat2Skill has three nested loops:
+
+1. **Session learning loop**: retrieve skills before work, observe user feedback
+   during work, extract or update skills after work, then use the updated skill
+   bank next time.
+2. **Candidate refinement loop**: if the judge rejects a generated skill, feed
+   the judge weakness back into generation and retry up to two times.
+3. **Maintenance loop**: score active skills by utilization, replay
+   effectiveness, recency, and overlap; merge near-duplicates and archive old
+   weak skills instead of letting the prompt grow forever.
 
 ## How it works
 
@@ -36,7 +140,8 @@ UserPromptSubmit hook ◄── local retrieval   (project summary)
 - **Response guard.** When a project summary contains a high-confidence
   deterministic wording constraint, the Stop hook checks the final assistant
   message locally. The learned rule is evidence-based: verified facts must use
-  definitive wording; evidence gaps must name the missing evidence and the next
+  definitive wording; evidence gaps must name the missing source material,
+  data, record, document, log, test, command output, or code and the next
   validation step. The guard only reads explicit `response_guard` frontmatter,
   never prose examples or code identifiers. The default guard mode is
   `adaptive`: repeated violations are throttled with a growing cooldown and
@@ -102,7 +207,7 @@ variables if you prefer shell config or need to override the JSON file.
 Install from the Chat2Skill marketplace:
 
 ```bash
-claude plugin marketplace add https://github.com/rexia01/chat2skill
+claude plugin marketplace add https://github.com/rxacc/chat2skill
 claude plugin install chat2skill@chat2skill
 ```
 
@@ -118,8 +223,28 @@ no path setup needed.
 
 ### 2b. Codex
 
+Install from the Chat2Skill marketplace:
+
 ```bash
-git clone https://github.com/rexia01/chat2skill.git ~/plugins/chat2skill
+codex plugin marketplace add rxacc/chat2skill
+codex
+```
+
+Open `/plugins`, select the `chat2skill` marketplace, and install
+`chat2skill`.
+
+For non-interactive install:
+
+```bash
+codex plugin marketplace add rxacc/chat2skill
+codex plugin add chat2skill@chat2skill
+codex
+```
+
+For local development or manual hook generation:
+
+```bash
+git clone https://github.com/rxacc/chat2skill.git ~/plugins/chat2skill
 cd ~/plugins/chat2skill && ./install.sh
 ```
 
@@ -136,7 +261,7 @@ In Cursor:
 2. Paste this repository URL into **Search or Paste Link**:
 
 ```text
-https://github.com/rexia01/chat2skill
+https://github.com/rxacc/chat2skill
 ```
 
 The Cursor plugin uses:

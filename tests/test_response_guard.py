@@ -40,15 +40,15 @@ EVIDENCE_BASED_SOURCE = (
     "  mode: evidence_based_terms\n"
     "  requires_evidence: true\n"
     "  allow_evidence_gap_disclosure: true\n"
+    "  strict_terms:\n"
+    "    - strict-block\n"
     "  evidence_markers:\n"
-    "    - 日志\n"
-    "    - 测试\n"
+    "    - evidence-token\n"
     "  gap_markers:\n"
-    "    - 证据不足\n"
-    "    - 需要验证\n"
+    "    - gap-token\n"
     "  forbidden_terms:\n"
-    "    - 可能\n"
-    "    - 如果\n"
+    "    - strict-block\n"
+    "    - context-block\n"
     "---\n"
 )
 
@@ -118,7 +118,7 @@ class ResponseGuardTests(unittest.TestCase):
 
     def test_evidence_based_mode_allows_gap_with_validation_action(self):
         result = evaluate_message(
-            "当前证据不足，如果要给最终结论，需要先查看日志并补跑测试。",
+            "gap-token context-block evidence-token.",
             sources=[EVIDENCE_BASED_SOURCE],
             user_id="u",
         )
@@ -127,13 +127,34 @@ class ResponseGuardTests(unittest.TestCase):
 
     def test_evidence_based_mode_blocks_speculative_gap_claims(self):
         result = evaluate_message(
-            "当前证据不足，可能是缓存问题。",
+            "gap-token strict-block evidence-token.",
             sources=[EVIDENCE_BASED_SOURCE],
             user_id="u",
         )
 
         self.assertTrue(result.blocked)
-        self.assertEqual(result.terms, ("可能",))
+        self.assertEqual(result.terms, ("strict-block",))
+
+    def test_evidence_based_mode_requires_policy_markers_from_frontmatter(self):
+        source = (
+            "---\n"
+            "name: deterministic-response-constraint\n"
+            "response_guard:\n"
+            "  enabled: true\n"
+            "  mode: evidence_based_terms\n"
+            "  allow_evidence_gap_disclosure: true\n"
+            "  forbidden_terms:\n"
+            "    - context-block\n"
+            "---\n"
+        )
+        result = evaluate_message(
+            "gap-token context-block evidence-token.",
+            sources=[source],
+            user_id="u",
+        )
+
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.terms, ("context-block",))
 
     def test_block_once_mode_suppresses_repeated_hits_until_reset(self):
         with tempfile.TemporaryDirectory() as tmp:

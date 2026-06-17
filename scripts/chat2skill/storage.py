@@ -660,6 +660,7 @@ def _response_guard_from_content(content: str) -> dict:
     allow_evidence_gap_disclosure = False
     lists: dict[str, list[str]] = {
         "forbidden_terms": [],
+        "strict_terms": [],
         "evidence_markers": [],
         "gap_markers": [],
     }
@@ -675,7 +676,7 @@ def _response_guard_from_content(content: str) -> dict:
         if re.match(r"\s*allow_evidence_gap_disclosure\s*:\s*true\s*$", line, re.IGNORECASE):
             allow_evidence_gap_disclosure = True
             continue
-        list_match = re.match(r"\s*(forbidden_terms|evidence_markers|gap_markers)\s*:", line)
+        list_match = re.match(r"\s*(forbidden_terms|strict_terms|evidence_markers|gap_markers)\s*:", line)
         if list_match:
             current_list = list_match.group(1)
             continue
@@ -703,4 +704,6 @@ def _response_guard_from_content(content: str) -> dict:
         guard["evidence_markers"] = lists["evidence_markers"]
     if lists["gap_markers"]:
         guard["gap_markers"] = lists["gap_markers"]
+    if lists["strict_terms"]:
+        guard["strict_terms"] = lists["strict_terms"]
     return guard

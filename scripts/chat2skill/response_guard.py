@@ -30,54 +30,6 @@ GUARD_STATE_TTL_SECONDS = 24 * 60 * 60
 GUARD_STATE_MAX_ENTRIES = 512
 ADAPTIVE_MAX_COOLDOWN = 8
 EVIDENCE_BASED_MODE = "evidence_based_terms"
-SPECULATIVE_TERMS = {
-    "可疑",
-    "可能",
-    "不确定",
-    "maybe",
-    "possibly",
-    "probably",
-    "uncertain",
-    "hedging",
-}
-DEFAULT_GAP_MARKERS = (
-    "证据不足",
-    "缺少",
-    "尚未验证",
-    "未验证",
-    "不能给最终结论",
-    "需要验证",
-    "需要检查",
-    "insufficient evidence",
-    "missing",
-    "not verified",
-    "cannot conclude",
-    "need to verify",
-    "need to inspect",
-)
-DEFAULT_EVIDENCE_MARKERS = (
-    "代码",
-    "文件",
-    "文档",
-    "日志",
-    "测试",
-    "命令输出",
-    "路径",
-    "证据",
-    "验证",
-    "检查",
-    "查看",
-    "code",
-    "file",
-    "docs",
-    "logs",
-    "tests",
-    "command output",
-    "path",
-    "evidence",
-    "verify",
-    "inspect",
-)
 
 
 @dataclass(frozen=True)
@@ -97,6 +49,7 @@ class GuardPolicy:
     forbidden_terms: tuple[str, ...]
     requires_evidence: bool = False
     allow_evidence_gap_disclosure: bool = False
+    strict_terms: tuple[str, ...] = ()
     evidence_markers: tuple[str, ...] = ()
     gap_markers: tuple[str, ...] = ()
 
@@ -455,13 +408,16 @@ def _allowed_by_guard_policy(
 ) -> bool:
     if policy.mode != EVIDENCE_BASED_MODE or not policy.allow_evidence_gap_disclosure:
         return False
-    if term.casefold() in SPECULATIVE_TERMS:
+    if term.casefold() in {item.casefold() for item in policy.strict_terms}:
         return False
 
     sentence = _surrounding_sentence(prose, start, end)
-    gap_markers = policy.gap_markers or DEFAULT_GAP_MARKERS
-    evidence_markers = policy.evidence_markers or DEFAULT_EVIDENCE_MARKERS
-    return _contains_any(sentence, gap_markers) and _contains_any(sentence, evidence_markers)
+    return (
+        bool(policy.gap_markers)
+        and bool(policy.evidence_markers)
+        and _contains_any(sentence, policy.gap_markers)
+        and _contains_any(sentence, policy.evidence_markers)
+    )
 
 
 def _surrounding_sentence(text: str, start: int, end: int) -> str:
@@ -498,6 +454,7 @@ def _structured_guard_policy(source: str) -> GuardPolicy | None:
     allow_evidence_gap_disclosure = False
     lists: dict[str, list[str]] = {
         "forbidden_terms": [],
+        "strict_terms": [],
         "evidence_markers": [],
         "gap_markers": [],
     }
@@ -513,7 +470,7 @@ def _structured_guard_policy(source: str) -> GuardPolicy | None:
         if re.match(r"\s*allow_evidence_gap_disclosure\s*:\s*true\s*$", line, re.IGNORECASE):
             allow_evidence_gap_disclosure = True
             continue
-        list_match = re.match(r"\s*(forbidden_terms|evidence_markers|gap_markers)\s*:", line)
+        list_match = re.match(r"\s*(forbidden_terms|strict_terms|evidence_markers|gap_markers)\s*:", line)
         if list_match:
             current_list = list_match.group(1)
             continue
@@ -533,6 +490,7 @@ def _structured_guard_policy(source: str) -> GuardPolicy | None:
         forbidden_terms=terms,
         requires_evidence=requires_evidence,
         allow_evidence_gap_disclosure=allow_evidence_gap_disclosure,
+        strict_terms=tuple(_dedupe_terms(lists["strict_terms"])),
         evidence_markers=tuple(_dedupe_terms(lists["evidence_markers"])),
         gap_markers=tuple(_dedupe_terms(lists["gap_markers"])),
     )
