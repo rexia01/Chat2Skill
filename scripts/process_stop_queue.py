@@ -22,6 +22,7 @@ from chat2skill.transcripts import parse_transcript
 QUEUE_PATH = DATA_HOME / "stop-queue.jsonl"
 LOCK_PATH = DATA_HOME / "stop-worker.lock"
 MAX_BATCH_LOOPS = 3
+PROJECT_SKILL_REBUILD_STATUSES = {"saved", "memory_saved"}
 
 
 def main() -> int:
@@ -154,6 +155,7 @@ def process_job(job: dict[str, Any], config: dict) -> None:
                 user_id=user_id,
                 error=f"{type(exc).__name__}: {str(exc)[:240]}",
             )
+    if result.get("status") in PROJECT_SKILL_REBUILD_STATUSES:
         try:
             recent = parse_transcript(session_file)[-30:]
             project_skill_path = runner.rebuild_project_skill(user_id, config, recent)

@@ -14,6 +14,8 @@ from chat2skill import runner
 from chat2skill.config import base_user_id, load_config
 from chat2skill.transcripts import find_latest_session
 
+PROJECT_SKILL_REBUILD_STATUSES = {"saved", "memory_saved"}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Update Chat2Skill from transcripts.")
@@ -47,7 +49,7 @@ def main() -> int:
             project_dir=args.project_dir,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        if result.get("status") == "saved":
+        if result.get("status") in PROJECT_SKILL_REBUILD_STATUSES:
             project_skill = runner.rebuild_project_skill(args.user_id, config)
             if project_skill:
                 print(f"Project skill updated: {project_skill}")

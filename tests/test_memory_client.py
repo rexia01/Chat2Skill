@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from chat2skill import memory_client, runner
 from chat2skill.context_store import apply_memory_result, load_context, save_context
 from chat2skill.models import MemoryItem, Skill
+import process_stop_queue
 
 
 def _config() -> dict:
@@ -468,6 +469,43 @@ class MemoryClientTests(unittest.TestCase):
             self.assertEqual(skill_payload["memory_items"][0]["item_type"], "constraint")
             self.assertEqual(skill_payload["memory_items"][0]["title"], "Keep rollback")
             self.assertEqual(saved["source_memory_count"], 2)
+
+    def test_stop_worker_rebuilds_project_skill_after_memory_saved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "session.jsonl"
+            session.write_text("{}", encoding="utf-8")
+            job = {
+                "user_id": "user-1",
+                "session_file": str(session),
+                "project_dir": "/repo/project",
+            }
+            config = _config()
+
+            with patch.object(
+                process_stop_queue.runner,
+                "run_extraction",
+                return_value={"status": "memory_saved"},
+            ):
+                with patch.object(process_stop_queue.runner, "run_maintenance") as maintenance:
+                    with patch.object(
+                        process_stop_queue.runner,
+                        "rebuild_project_skill",
+                        return_value=Path(tmp) / "PROJECT_SKILL.md",
+                    ) as rebuild:
+                        with patch.object(
+                            process_stop_queue,
+                            "parse_transcript",
+                            return_value=[{"role": "user", "content": "hello"}],
+                        ):
+                            with patch.object(process_stop_queue, "log_event"):
+                                process_stop_queue.process_job(job, config)
+
+            maintenance.assert_not_called()
+            rebuild.assert_called_once_with(
+                "user-1",
+                config,
+                [{"role": "user", "content": "hello"}],
+            )
 
     def test_apply_memory_result_updates_existing_memory(self):
         context = {
