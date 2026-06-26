@@ -4,7 +4,10 @@
     "target_model": "claude",
     "token_budget": 4000,
     "memory_ratio": 0.6,
-    "skill_top_k": 6
+    "skill_top_k": 6,
+    "prompt_memory_top_k": 12,
+    "learn_memory_top_k": 40,
+    "learn_skill_top_k": 20
   },
   "api_url": "https://api.chat2skill.com",
   "llm": {

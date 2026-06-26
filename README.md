@@ -162,10 +162,11 @@ cp config.example.json ~/.chat2skill/config.json
 # edit ~/.chat2skill/config.json: set api_url and llm.api_key
 ```
 
-Use one config file. The default backend is `memory`, which calls the unified
-Chat2Skill API and stores returned project memory, conversations, skills, and
-profiles in `~/.chat2skill/c2s.db`. Rendered skill files stay under
-`~/.chat2skill/skills/`.
+Use one config file. The default backend is `memory`, which calls the
+stateless Chat2Skill learn API for extraction and stores returned project
+memory, conversations, skills, and profiles in `~/.chat2skill/c2s.db`.
+Prompt retrieval runs locally from that database; rendered skill files stay
+under `~/.chat2skill/skills/`.
 
 For OpenAI-compatible models, write `~/.chat2skill/config.json` like this:
 
@@ -178,7 +179,10 @@ For OpenAI-compatible models, write `~/.chat2skill/config.json` like this:
     "target_model": "claude",
     "token_budget": 4000,
     "memory_ratio": 0.6,
-    "skill_top_k": 6
+    "skill_top_k": 6,
+    "prompt_memory_top_k": 12,
+    "learn_memory_top_k": 40,
+    "learn_skill_top_k": 20
   },
   "llm": {
     "api_key": "your-openai-compatible-api-key",
@@ -199,7 +203,10 @@ For DeepSeek, write `~/.chat2skill/config.json` like this:
     "target_model": "claude",
     "token_budget": 4000,
     "memory_ratio": 0.6,
-    "skill_top_k": 6
+    "skill_top_k": 6,
+    "prompt_memory_top_k": 12,
+    "learn_memory_top_k": 40,
+    "learn_skill_top_k": 20
   },
   "llm": {
     "api_key": "your-deepseek-api-key",
@@ -215,11 +222,11 @@ variables if you prefer shell config or need to override the JSON file.
 | Environment variable | JSON key | Default | Description |
 | --- | --- | --- | --- |
 | `CHAT2SKILL_BACKEND` | `backend` | `memory` | Backend used by hooks. Use `memory` for unified memory+skills, or `chat2skill` for the legacy skill-only flow. |
-| `CHAT2SKILL_API_URL` | `api_url` | `https://api.chat2skill.com` | Chat2Skill API endpoint used for unified memory+skills learn/retrieve and legacy extraction. |
-| `CHAT2SKILL_MEMORY_TARGET_MODEL` | `memory.target_model` | `claude` | Renderer target passed to unified retrieve. |
+| `CHAT2SKILL_API_URL` | `api_url` | `https://api.chat2skill.com` | Chat2Skill API endpoint used for stateless learn/extract calls and legacy extraction. |
+| `CHAT2SKILL_MEMORY_TARGET_MODEL` | `memory.target_model` | `claude` | Reserved renderer target for API-compatible payloads. |
 | `CHAT2SKILL_MEMORY_TOKEN_BUDGET` | `memory.token_budget` | `4000` | Total prompt-injection token budget for memory plus skills. |
 | `CHAT2SKILL_MEMORY_MEMORY_RATIO` | `memory.memory_ratio` | `0.6` | Fraction of retrieval budget initially allocated to memory. |
-| `CHAT2SKILL_MEMORY_SKILL_TOP_K` | `memory.skill_top_k` | `6` | Maximum detailed skills returned by unified retrieve. |
+| `CHAT2SKILL_MEMORY_SKILL_TOP_K` | `memory.skill_top_k` | `6` | Maximum detailed skills injected by local prompt retrieval. |
 | `OPENAI_API_KEY` | `llm.api_key` | unset | Your OpenAI-compatible LLM API key. If unset, extraction falls back to lower-quality heuristics. |
 | `OPENAI_BASE_URL` | `llm.base_url` | `null` | Optional OpenAI-compatible base URL. Use `null` for OpenAI; use `https://api.deepseek.com` for DeepSeek. |
 | `CHAT2SKILL_MODEL` | `llm.model` | `gpt-4.1` | Model used for detect/analyze/generate/judge calls. |
@@ -391,7 +398,7 @@ adapter map.
 ├── config.json                  # endpoint + your LLM credentials
 ├── c2s.db                       # conversations, skills, profile, project memory
 ├── skills/<user>/<name>/SKILL.md
-├── skills/<user>/PROJECT_SKILL.md   # injected before each conversation and read by response guard
+├── skills/<user>/PROJECT_SKILL.md   # human-readable project summary and response-guard input
 └── hook-events.log
 ```
 
@@ -400,9 +407,13 @@ you learn in one repo doesn't leak into another.
 
 ## Privacy
 
-- Conversations are sent to the Chat2Skill API for analysis, processed
-  in memory, and not persisted server-side. Server logs contain metadata
-  only (session id, error type) — never message content or api keys.
+- Stop-hook transcripts are sent to the Chat2Skill API for stateless
+  analysis, processed in memory, and not persisted server-side. Server logs
+  contain metadata only (session id, error type) — never message content or
+  api keys.
+- Prompt retrieval does not call the cloud API. It loads top-K project
+  memory and skills from local `~/.chat2skill/c2s.db`, applies the configured
+  budget, and injects the compact result into the prompt.
 - Agent system prompts, environment banners, and tool noise are stripped
   locally before upload (see `scripts/chat2skill/transcripts.py`).
 - To stop all uploads, remove the Stop hook or unset `api_url`.

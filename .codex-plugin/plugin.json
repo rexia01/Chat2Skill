@@ -1,7 +1,7 @@
 {
   "name": "chat2skill",
-  "version": "0.1.3",
-  "description": "Automatically learn and retrieve coding-agent memory and skills through the unified Memory-backed Chat2Skill API and enforce learned hard response constraints.",
+  "version": "0.1.3+codex.20260626014612",
+  "description": "Automatically learn coding-agent memory and skills through stateless Chat2Skill extraction, retrieve local context from c2s.db, and enforce learned hard response constraints.",
   "author": {
     "name": "Chat2Skill contributors"
   },
@@ -9,10 +9,13 @@
   "interface": {
     "displayName": "Chat2Skill",
     "shortDescription": "Learn and retrieve memory and skills from agent conversations.",
-    "longDescription": "Chat2Skill captures conversations after each session, sends local memory and skill state to the unified Chat2Skill cloud API, stores returned memory deltas under ~/.chat2skill/contexts and learned skills under ~/.chat2skill/skills, injects relevant project memory plus skills into new conversations, and uses Stop hooks to enforce learned hard wording constraints before a turn ends.",
+    "longDescription": "Chat2Skill captures conversations after each session, sends a compact current transcript plus locally retrieved top-K context to the stateless Chat2Skill learn API, stores returned memory and skills in ~/.chat2skill/c2s.db, injects relevant local project memory plus skills into new conversations without cloud retrieval, and uses Stop hooks to enforce learned hard wording constraints before a turn ends.",
     "developerName": "Chat2Skill contributors",
     "category": "Productivity",
-    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "capabilities": [
+      "Instructions",
+      "Lifecycle hooks"
+    ],
     "websiteURL": "https://github.com/rxacc/chat2skill",
     "defaultPrompt": [
       "Use Chat2Skill to retrieve relevant learned skills for this task.",

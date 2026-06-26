@@ -2,12 +2,13 @@
 
 This adapter matches the stateless c2s-algorithm API:
 - local plugin storage owns memory state in ~/.chat2skill/c2s.db
-- cloud API runs /v1/unified/learn and /v1/unified/retrieve
+- cloud API runs /v1/unified/learn on compact caller-provided context
 - returned memory delta and skill updates are persisted locally by the plugin
 """
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -22,11 +23,26 @@ from .context_store import (
     save_materialization,
 )
 from .models import Skill, UserModel
+from .retrieval import MemoryRetriever, SkillRetriever
 from .transcripts import parse_transcript
 
 
 class MemoryClientError(Exception):
     pass
+
+
+DEFAULT_TOKEN_BUDGET = 4000
+DEFAULT_MEMORY_RATIO = 0.6
+DEFAULT_PROMPT_MEMORY_TOP_K = 12
+DEFAULT_PROMPT_SKILL_TOP_K = 6
+DEFAULT_LEARN_MEMORY_TOP_K = 40
+DEFAULT_LEARN_SKILL_TOP_K = 20
+DEFAULT_LEARN_MAX_MESSAGES = 120
+DEFAULT_LEARN_MESSAGE_CHAR_LIMIT = 6000
+DEFAULT_LEARN_TOTAL_CHAR_LIMIT = 90000
+SKILL_CONTENT_CHAR_LIMIT = 2400
+MEMORY_CONTENT_CHAR_LIMIT = 1200
+CORE_MEMORY_CHAR_LIMIT = 5000
 
 
 def materialize_for_prompt(
@@ -35,27 +51,37 @@ def materialize_for_prompt(
     prompt: str,
     user_id: str,
 ) -> dict[str, Any]:
-    """Return unified prompt-ready memory + skills for the current prompt."""
+    """Return prompt-ready memory + skills from local c2s.db.
+
+    The privacy contract keeps long-lived user data local. Prompt retrieval
+    therefore does not call the cloud API; the cloud is used for stateless
+    learn/extract calls only.
+    """
     storage.init_db()
     context = load_context(project_dir, user_id)
     skills = storage.load_skills(user_id, include_pending=False)
-    payload = {
-        "user_id": user_id,
-        "query": prompt,
-        "existing_memory": context_state(context),
-        "existing_skills": [skill.to_dict() for skill in skills],
-        "user_profile": storage.load_user_profile(user_id).to_dict(),
-        "token_budget": int((config.get("memory") or {}).get("token_budget") or 4000),
-        "memory_ratio": float((config.get("memory") or {}).get("memory_ratio") or 0.6),
-        "skill_top_k": int((config.get("memory") or {}).get("skill_top_k") or 6),
-        "target_model": (config.get("memory") or {}).get("target_model") or "generic",
-        "llm": llm_payload(config),
-    }
-    try:
-        result = api_client.unified_retrieve(config["api_url"], payload)
-    except api_client.ApiError as exc:
-        raise MemoryClientError(str(exc)) from None
 
+    options = _memory_options(config)
+    retrieved_memories = MemoryRetriever().retrieve(
+        prompt,
+        context.get("memories") or [],
+        top_k=options["prompt_memory_top_k"],
+        active_only=True,
+    )
+    retrieved_skills = SkillRetriever().retrieve(
+        prompt,
+        skills,
+        top_k=options["skill_top_k"],
+        active_only=True,
+    )
+
+    result = _build_local_materialization(
+        context=context,
+        retrieved_memories=retrieved_memories,
+        retrieved_skills=retrieved_skills,
+        token_budget=options["token_budget"],
+        memory_ratio=options["memory_ratio"],
+    )
     save_materialization(context, result, prompt)
     save_context(project_dir, user_id, context)
     return result
@@ -78,16 +104,19 @@ def commit_transcript(
     storage.save_conversation(session_id, user_id, messages)
 
     context = load_context(project_dir, user_id)
-    existing_skills = storage.load_skills(user_id)
+    options = _memory_options(config)
+    task_text = _messages_text(messages)
+    existing_memory = _context_state_for_learn(context, task_text, options)
+    existing_skills = _skills_for_learn(user_id, task_text, options)
     profile = storage.load_user_profile(user_id)
     payload = {
         "session_id": session_id,
         "user_id": user_id,
         "agent_id": (config.get("memory") or {}).get("agent_id") or "chat2skill",
-        "messages": messages,
+        "messages": _trim_messages_for_learn(messages, options),
         "feedback": None,
-        "existing_memory": context_state(context),
-        "existing_skills": [skill.to_dict() for skill in existing_skills],
+        "existing_memory": existing_memory,
+        "existing_skills": [_skill_payload_for_learn(skill) for skill in existing_skills],
         "user_profile": profile.to_dict(),
         "llm": llm_payload(config),
     }
@@ -134,3 +163,188 @@ def _persist_skill_response(skills: dict[str, Any], user_id: str) -> dict[str, A
 
     storage.save_skill(skill, user_id=user_id)
     return {"status": "saved", "skill": skill.name, "skill_status": skill.status}
+
+
+def _memory_options(config: dict) -> dict[str, Any]:
+    memory = dict(config.get("memory") or {})
+    token_budget = int(memory.get("token_budget") or DEFAULT_TOKEN_BUDGET)
+    memory_ratio = float(memory.get("memory_ratio") or DEFAULT_MEMORY_RATIO)
+    return {
+        "token_budget": token_budget,
+        "memory_ratio": memory_ratio,
+        "prompt_memory_top_k": int(memory.get("prompt_memory_top_k") or DEFAULT_PROMPT_MEMORY_TOP_K),
+        "skill_top_k": int(memory.get("skill_top_k") or DEFAULT_PROMPT_SKILL_TOP_K),
+        "learn_memory_top_k": int(memory.get("learn_memory_top_k") or DEFAULT_LEARN_MEMORY_TOP_K),
+        "learn_skill_top_k": int(memory.get("learn_skill_top_k") or DEFAULT_LEARN_SKILL_TOP_K),
+        "learn_max_messages": int(memory.get("learn_max_messages") or DEFAULT_LEARN_MAX_MESSAGES),
+        "learn_message_char_limit": int(
+            memory.get("learn_message_char_limit") or DEFAULT_LEARN_MESSAGE_CHAR_LIMIT
+        ),
+        "learn_total_char_limit": int(
+            memory.get("learn_total_char_limit") or DEFAULT_LEARN_TOTAL_CHAR_LIMIT
+        ),
+    }
+
+
+def _build_local_materialization(
+    *,
+    context: dict[str, Any],
+    retrieved_memories: list,
+    retrieved_skills: list,
+    token_budget: int,
+    memory_ratio: float,
+) -> dict[str, Any]:
+    memory_budget = int(token_budget * memory_ratio)
+    skill_budget = max(200, token_budget - memory_budget)
+    core_memory = str(context.get("core_memory") or "").strip()
+    memory_text = MemoryRetriever().format_for_prompt(retrieved_memories)
+    skills_text = _format_skills_for_prompt(retrieved_skills)
+
+    memory_parts = []
+    if core_memory:
+        memory_parts.append("## Project Core Memory\n" + _cap_text(core_memory, memory_budget // 2))
+    if memory_text:
+        memory_parts.append(
+            "## Relevant Project Memories\n"
+            + _cap_text(memory_text, max(200, memory_budget - _estimate_tokens(core_memory)))
+        )
+
+    prompt_parts = []
+    if memory_parts:
+        prompt_parts.append("\n\n".join(memory_parts))
+    if skills_text:
+        prompt_parts.append("## Relevant Project Skills\n" + _cap_text(skills_text, skill_budget))
+
+    rendered = "\n\n".join(part for part in prompt_parts if part.strip())
+    rendered = _cap_text(rendered, token_budget)
+    materialization_id = str(uuid.uuid4())
+    return {
+        "schema_version": "1",
+        "rendered_text": rendered,
+        "token_count": _estimate_tokens(rendered),
+        "materialization_id": materialization_id,
+        "memory": {
+            "rendered_text": "\n\n".join(memory_parts),
+            "memories_included": [
+                str(item.memory.get("id"))
+                for item in retrieved_memories
+                if item.memory.get("id")
+            ],
+            "schemas_included": [],
+            "token_count": _estimate_tokens("\n\n".join(memory_parts)),
+            "coverage_score": 1.0 if rendered else 0.0,
+        },
+        "skills": {
+            "skills_included": [item.skill.name for item in retrieved_skills],
+            "token_count": _estimate_tokens(skills_text),
+        },
+    }
+
+
+def _context_state_for_learn(
+    context: dict[str, Any],
+    task_text: str,
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    state = context_state(context)
+    retrieved = MemoryRetriever().retrieve(
+        task_text,
+        state.get("memories") or [],
+        top_k=options["learn_memory_top_k"],
+        active_only=True,
+    )
+    state["core_memory"] = _cap_chars(str(state.get("core_memory") or ""), CORE_MEMORY_CHAR_LIMIT)
+    state["memories"] = [_memory_payload_for_learn(item.memory) for item in retrieved]
+    state["schemas"] = _schemas_for_memories(
+        state.get("schemas") or [],
+        {str(item.memory.get("id")) for item in retrieved if item.memory.get("id")},
+    )
+    return state
+
+
+def _schemas_for_memories(schemas: list[dict], memory_ids: set[str]) -> list[dict]:
+    selected = []
+    for schema in schemas:
+        ids = {str(item) for item in schema.get("memory_ids") or []}
+        if ids & memory_ids:
+            selected.append(schema)
+    return selected[:10]
+
+
+def _skills_for_learn(user_id: str, task_text: str, options: dict[str, Any]) -> list[Skill]:
+    skills = storage.load_skills(user_id, include_pending=False)
+    retrieved = SkillRetriever().retrieve(
+        task_text,
+        skills,
+        top_k=options["learn_skill_top_k"],
+        active_only=True,
+    )
+    return [item.skill for item in retrieved]
+
+
+def _skill_payload_for_learn(skill: Skill) -> dict[str, Any]:
+    payload = skill.to_dict()
+    payload["content"] = _cap_chars(str(payload.get("content") or ""), SKILL_CONTENT_CHAR_LIMIT)
+    payload["embedding_vector"] = []
+    payload["memory_items"] = []
+    return payload
+
+
+def _memory_payload_for_learn(memory: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(memory)
+    payload["content"] = _cap_chars(str(payload.get("content") or ""), MEMORY_CONTENT_CHAR_LIMIT)
+    payload["embedding"] = []
+    return payload
+
+
+def _trim_messages_for_learn(messages: list[dict], options: dict[str, Any]) -> list[dict]:
+    max_messages = max(2, int(options["learn_max_messages"]))
+    char_limit = max(500, int(options["learn_message_char_limit"]))
+    total_limit = max(2000, int(options["learn_total_char_limit"]))
+    selected = messages[-max_messages:]
+    trimmed = []
+    used = 0
+    for message in selected:
+        content = _cap_chars(str(message.get("content") or ""), char_limit)
+        if used + len(content) > total_limit and len(trimmed) >= 2:
+            break
+        used += len(content)
+        item = dict(message)
+        item["content"] = content
+        trimmed.append(item)
+    return trimmed
+
+
+def _messages_text(messages: list[dict]) -> str:
+    return "\n".join(
+        str(message.get("content") or "")
+        for message in messages
+        if message.get("content")
+    )
+
+
+def _format_skills_for_prompt(retrieved: list) -> str:
+    sections = []
+    for item in retrieved:
+        skill = item.skill
+        content = _cap_chars((skill.content or "").strip(), SKILL_CONTENT_CHAR_LIMIT)
+        sections.append(
+            f"### {skill.name} score={item.score:.3f}\n"
+            f"Description: {skill.description}\n\n"
+            f"{content}"
+        )
+    return "\n\n".join(sections)
+
+
+def _cap_text(text: str, token_budget: int) -> str:
+    return _cap_chars(text, max(0, token_budget) * 4)
+
+
+def _cap_chars(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars)].rstrip() + "\n...[truncated]"
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(0, len(text) // 4)

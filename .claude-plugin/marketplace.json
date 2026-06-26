@@ -1,5 +1,4 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "chat2skill",
   "description": "Marketplace for Chat2Skill Claude Code plugins.",
   "owner": {

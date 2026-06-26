@@ -21,6 +21,12 @@ class RetrievedSkill:
     score: float
 
 
+@dataclass
+class RetrievedMemory:
+    memory: dict
+    score: float
+
+
 class SkillRetriever:
     """Retrieve a compact top-k skill set for the current task."""
 
@@ -150,3 +156,95 @@ class SkillRetriever:
         return concepts
 
 
+class MemoryRetriever:
+    """Retrieve compact project memories from the local c2s.db state."""
+
+    TYPE_WEIGHT = {
+        "decision": 0.16,
+        "procedure": 0.14,
+        "warning": 0.13,
+        "strategy": 0.12,
+        "principle": 0.1,
+        "fact": 0.08,
+        "exception": 0.08,
+        "episodic": 0.03,
+    }
+
+    def retrieve(
+        self,
+        task_text: str,
+        memories: Iterable[dict],
+        top_k: int = 12,
+        active_only: bool = True,
+    ) -> List[RetrievedMemory]:
+        query_tokens = SkillRetriever._tokens(task_text)
+        candidates: List[RetrievedMemory] = []
+
+        for memory in memories:
+            if active_only and (
+                not memory.get("is_active", True) or memory.get("is_archived", False)
+            ):
+                continue
+            text = self._memory_text(memory)
+            score = self._score(query_tokens, memory, text)
+            if score <= 0:
+                continue
+            candidates.append(RetrievedMemory(memory=memory, score=score))
+
+        candidates.sort(
+            key=lambda item: (
+                item.score,
+                float(item.memory.get("salience") or 0.0),
+                float(item.memory.get("confidence") or 0.0),
+            ),
+            reverse=True,
+        )
+        return candidates[: max(0, top_k)]
+
+    def format_for_prompt(self, retrieved: List[RetrievedMemory]) -> str:
+        if not retrieved:
+            return ""
+
+        lines = []
+        for item in retrieved:
+            memory = item.memory
+            memory_type = str(memory.get("memory_type") or "fact")
+            section = str(memory.get("section") or "general")
+            content = str(memory.get("content") or "").strip()
+            if not content:
+                continue
+            lines.append(f"- [{memory_type}/{section}] {content}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _memory_text(memory: dict) -> str:
+        return "\n".join(
+            str(part)
+            for part in [
+                memory.get("memory_type"),
+                memory.get("section"),
+                memory.get("content"),
+                memory.get("source_session"),
+            ]
+            if part
+        )
+
+    def _score(self, query_tokens: set[str], memory: dict, memory_text: str) -> float:
+        lexical = similarity.jaccard(query_tokens, SkillRetriever._tokens(memory_text))
+        exact = self._exact_boost(query_tokens, memory_text)
+        if query_tokens and lexical <= 0 and exact <= 0:
+            return 0.0
+        salience = float(memory.get("salience") or 0.5)
+        confidence = float(memory.get("confidence") or 0.5)
+        memory_type = str(memory.get("memory_type") or "fact")
+        type_boost = self.TYPE_WEIGHT.get(memory_type, 0.05)
+        return lexical + exact + (salience * 0.08) + (confidence * 0.06) + type_boost
+
+    @staticmethod
+    def _exact_boost(query_tokens: set[str], memory_text: str) -> float:
+        lower = memory_text.lower()
+        boost = 0.0
+        for token in query_tokens:
+            if len(token) >= 4 and token in lower:
+                boost += 0.02
+        return min(boost, 0.2)
