@@ -142,7 +142,7 @@ def process_job(job: dict[str, Any], config: dict) -> None:
         )
         return
 
-    summary_path = None
+    project_skill_path = None
     if result.get("status") == "saved":
         try:
             maintenance = runner.run_maintenance(user_id)
@@ -156,12 +156,12 @@ def process_job(job: dict[str, Any], config: dict) -> None:
             )
         try:
             recent = parse_transcript(session_file)[-30:]
-            summary_path = runner.rebuild_project_summary(user_id, config, recent)
+            project_skill_path = runner.rebuild_project_skill(user_id, config, recent)
         except ApiError as exc:
-            log_event("StopWorker.summary_failed", user_id=user_id, error=str(exc))
+            log_event("StopWorker.project_skill_failed", user_id=user_id, error=str(exc))
         except Exception as exc:  # noqa: BLE001
             log_event(
-                "StopWorker.summary_failed",
+                "StopWorker.project_skill_failed",
                 user_id=user_id,
                 error=f"{type(exc).__name__}: {str(exc)[:240]}",
             )
@@ -171,7 +171,7 @@ def process_job(job: dict[str, Any], config: dict) -> None:
         user_id=user_id,
         session_file=str(session_file),
         result=result,
-        summary_path=str(summary_path) if summary_path else None,
+        project_skill_path=str(project_skill_path) if project_skill_path else None,
     )
 
 

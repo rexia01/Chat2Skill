@@ -18,7 +18,7 @@ import re
 
 from . import storage
 from .hookio import first_string, project_dir_from_input, project_user_id
-from .runner import PROJECT_SUMMARY_FILE
+from .runner import PROJECT_SKILL_FILE
 
 
 FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -185,13 +185,17 @@ def assistant_message_from_input(data: dict) -> str:
 
 
 def load_guard_sources(user_id: str) -> List[str]:
-    """Load project summary and active source skills for one project namespace."""
+    """Load project-level skill and active source skills for one project namespace."""
     sources: list[str] = []
-    project_summary = storage.SKILL_DIR / user_id / PROJECT_SUMMARY_FILE
-    sources.extend(_read_existing([project_summary]))
 
     try:
         storage.init_db()
+        project_skill = storage.load_project_skill(user_id)
+        if project_skill and str(project_skill.get("content") or "").strip():
+            sources.append(str(project_skill["content"]))
+        else:
+            project_skill_file = storage.SKILL_DIR / user_id / PROJECT_SKILL_FILE
+            sources.extend(_read_existing([project_skill_file]))
         sources.extend(
             skill.content
             for skill in storage.load_skills(user_id, include_pending=False)

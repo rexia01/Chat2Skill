@@ -94,9 +94,10 @@ def init_db():
     _ensure_column(c, "skill_records", "replay_losses", "INTEGER")
     _ensure_column(c, "skill_records", "replay_rationale", "TEXT")
     _ensure_column(c, "skill_records", "language", "TEXT")
+    _migrate_memory_table_names(c)
 
     c.execute("""
-        CREATE TABLE IF NOT EXISTS memory_items (
+        CREATE TABLE IF NOT EXISTS skill_memory_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
             skill_name TEXT,
@@ -120,6 +121,21 @@ def init_db():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS project_skills (
+            user_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            language TEXT,
+            file_path TEXT,
+            version INTEGER,
+            source_skill_count INTEGER,
+            source_memory_count INTEGER,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS skill_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -130,7 +146,7 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_skill_usage_user ON skill_usage (user_id, used_at)")
 
     c.execute("""
-        CREATE TABLE IF NOT EXISTS c2s_memory_contexts (
+        CREATE TABLE IF NOT EXISTS memory_contexts (
             user_id TEXT NOT NULL,
             context_key TEXT NOT NULL,
             project_dir TEXT,
@@ -142,7 +158,7 @@ def init_db():
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS c2s_memory_items (
+        CREATE TABLE IF NOT EXISTS memory_items (
             user_id TEXT NOT NULL,
             context_key TEXT NOT NULL,
             id TEXT NOT NULL,
@@ -165,7 +181,7 @@ def init_db():
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS c2s_memory_schemas (
+        CREATE TABLE IF NOT EXISTS memory_schemas (
             user_id TEXT NOT NULL,
             context_key TEXT NOT NULL,
             id TEXT NOT NULL,
@@ -177,7 +193,7 @@ def init_db():
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS c2s_memory_materializations (
+        CREATE TABLE IF NOT EXISTS memory_materializations (
             user_id TEXT NOT NULL,
             context_key TEXT NOT NULL,
             materialization_id TEXT PRIMARY KEY,
@@ -188,7 +204,7 @@ def init_db():
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS c2s_memory_activity (
+        CREATE TABLE IF NOT EXISTS memory_activity (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
             context_key TEXT NOT NULL,
@@ -198,8 +214,8 @@ def init_db():
             created_at TEXT
         )
     """)
-    c.execute("CREATE INDEX IF NOT EXISTS idx_c2s_memory_context ON c2s_memory_items (user_id, context_key)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_c2s_memory_activity ON c2s_memory_activity (user_id, context_key, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_context ON memory_items (user_id, context_key)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_activity ON memory_activity (user_id, context_key, created_at)")
 
     c.execute("""
         INSERT OR IGNORE INTO skill_records
@@ -215,6 +231,7 @@ def init_db():
                'migrated from legacy skills table'
         FROM skills
     """)
+    _sync_project_skill_files(c)
     
     conn.commit()
     conn.close()
@@ -235,6 +252,160 @@ def _ensure_column(cursor, table: str, column: str, column_type: str):
         except sqlite3.OperationalError as e:
             if "duplicate column name" not in str(e).lower():
                 raise
+
+
+def _migrate_memory_table_names(cursor):
+    memory_items_columns = _table_columns(cursor, "memory_items")
+    if "skill_name" in memory_items_columns and not _table_exists(cursor, "skill_memory_items"):
+        cursor.execute("ALTER TABLE memory_items RENAME TO skill_memory_items")
+
+    mappings = [
+        ("c2s_memory_contexts", "memory_contexts"),
+        ("c2s_memory_items", "memory_items"),
+        ("c2s_memory_schemas", "memory_schemas"),
+        ("c2s_memory_materializations", "memory_materializations"),
+        ("c2s_memory_activity", "memory_activity"),
+    ]
+    for old_name, new_name in mappings:
+        if not _table_exists(cursor, old_name):
+            continue
+        if _table_exists(cursor, new_name):
+            cursor.execute(f"INSERT OR IGNORE INTO {new_name} SELECT * FROM {old_name}")
+            cursor.execute(f"DROP TABLE {old_name}")
+        else:
+            cursor.execute(f"ALTER TABLE {old_name} RENAME TO {new_name}")
+
+
+def _table_exists(cursor, table: str) -> bool:
+    row = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _table_columns(cursor, table: str) -> set[str]:
+    cursor.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in cursor.fetchall()}
+
+
+def _sync_project_skill_files(cursor):
+    if not SKILL_DIR.exists():
+        return
+    now = datetime.now().isoformat()
+    for path in SKILL_DIR.glob("*/PROJECT_SKILL.md"):
+        if not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        user_id = path.parent.name
+        updated_at = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
+        cursor.execute(
+            """
+            INSERT INTO project_skills
+            (user_id, name, content, language, file_path, version,
+             source_skill_count, source_memory_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                name = excluded.name,
+                content = excluded.content,
+                language = excluded.language,
+                file_path = excluded.file_path,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                "project-skill",
+                content,
+                _project_skill_language(content),
+                str(path),
+                1,
+                None,
+                None,
+                now,
+                updated_at,
+            ),
+        )
+
+
+def save_project_skill(
+    user_id: str,
+    content: str,
+    *,
+    file_path: Optional[Path] = None,
+    source_skill_count: Optional[int] = None,
+    source_memory_count: Optional[int] = None,
+):
+    now = datetime.now().isoformat()
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO project_skills
+        (user_id, name, content, language, file_path, version,
+         source_skill_count, source_memory_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            name = excluded.name,
+            content = excluded.content,
+            language = excluded.language,
+            file_path = excluded.file_path,
+            version = project_skills.version + 1,
+            source_skill_count = excluded.source_skill_count,
+            source_memory_count = excluded.source_memory_count,
+            updated_at = excluded.updated_at
+        """,
+        (
+            user_id,
+            "project-skill",
+            content,
+            _project_skill_language(content),
+            str(file_path) if file_path else None,
+            1,
+            source_skill_count,
+            source_memory_count,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_project_skill(user_id: str) -> Optional[dict]:
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    row = c.execute(
+        """
+        SELECT user_id, name, content, language, file_path, version,
+               source_skill_count, source_memory_count, created_at, updated_at
+        FROM project_skills
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "user_id": row[0],
+        "name": row[1],
+        "content": row[2],
+        "language": row[3],
+        "file_path": row[4],
+        "version": row[5],
+        "source_skill_count": row[6],
+        "source_memory_count": row[7],
+        "created_at": row[8],
+        "updated_at": row[9],
+    }
+
+
+def _project_skill_language(content: str) -> Optional[str]:
+    match = re.search(r"^language:\s*([A-Za-z-]+)\s*$", content or "", flags=re.MULTILINE)
+    return match.group(1) if match else None
 
 
 def save_conversation(session_id: str, user_id: str, messages: list, feedback: Optional[dict] = None):
@@ -449,7 +620,7 @@ def save_memory_items(items: List[MemoryItem], user_id: str, skill_name: Optiona
     c = conn.cursor()
     c.executemany(
         """
-        INSERT INTO memory_items
+        INSERT INTO skill_memory_items
         (user_id, skill_name, item_type, title, description, content, evidence,
          source_session, confidence, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -481,12 +652,12 @@ def _save_memory_dicts(items: List[dict], user_id: str, skill_name: Optional[str
     sessions = {item.get("source_session", "") for item in items if item.get("source_session")}
     for session in sessions:
         c.execute(
-            "DELETE FROM memory_items WHERE user_id = ? AND skill_name IS ? AND source_session = ?",
+            "DELETE FROM skill_memory_items WHERE user_id = ? AND skill_name IS ? AND source_session = ?",
             (user_id, skill_name, session),
         )
     c.executemany(
         """
-        INSERT INTO memory_items
+        INSERT INTO skill_memory_items
         (user_id, skill_name, item_type, title, description, content, evidence,
          source_session, confidence, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -673,7 +844,7 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
     context_row = c.execute(
         """
         SELECT project_dir, core_memory, recent_raw_hashes
-        FROM c2s_memory_contexts
+        FROM memory_contexts
         WHERE user_id = ? AND context_key = ?
         """,
         (user_id, context_key),
@@ -687,7 +858,7 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
         SELECT id, content, memory_type, section, salience, confidence, embedding,
                source_session, source_agent, recall_count, hit_count, miss_count,
                is_active, is_archived, created_at, updated_at
-        FROM c2s_memory_items
+        FROM memory_items
         WHERE user_id = ? AND context_key = ?
         ORDER BY created_at, id
         """,
@@ -696,7 +867,7 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
     schema_rows = c.execute(
         """
         SELECT id, name, description, memory_ids, created_at
-        FROM c2s_memory_schemas
+        FROM memory_schemas
         WHERE user_id = ? AND context_key = ?
         ORDER BY created_at, id
         """,
@@ -705,7 +876,7 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
     materialization_row = c.execute(
         """
         SELECT materialization_id, memories_included, query, outcome
-        FROM c2s_memory_materializations
+        FROM memory_materializations
         WHERE user_id = ? AND context_key = ?
         ORDER BY created_at DESC
         LIMIT 1
@@ -733,7 +904,7 @@ def save_project_memory_context(user_id: str, context_key: str, context: dict):
     c = conn.cursor()
     c.execute(
         """
-        INSERT INTO c2s_memory_contexts
+        INSERT INTO memory_contexts
         (user_id, context_key, project_dir, core_memory, recent_raw_hashes, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, context_key) DO UPDATE SET
@@ -752,10 +923,10 @@ def save_project_memory_context(user_id: str, context_key: str, context: dict):
             now,
         ),
     )
-    c.execute("DELETE FROM c2s_memory_items WHERE user_id = ? AND context_key = ?", (user_id, context_key))
+    c.execute("DELETE FROM memory_items WHERE user_id = ? AND context_key = ?", (user_id, context_key))
     c.executemany(
         """
-        INSERT INTO c2s_memory_items
+        INSERT INTO memory_items
         (user_id, context_key, id, content, memory_type, section, salience, confidence,
          embedding, source_session, source_agent, recall_count, hit_count, miss_count,
          is_active, is_archived, created_at, updated_at)
@@ -767,10 +938,10 @@ def save_project_memory_context(user_id: str, context_key: str, context: dict):
             if item.get("id")
         ],
     )
-    c.execute("DELETE FROM c2s_memory_schemas WHERE user_id = ? AND context_key = ?", (user_id, context_key))
+    c.execute("DELETE FROM memory_schemas WHERE user_id = ? AND context_key = ?", (user_id, context_key))
     c.executemany(
         """
-        INSERT INTO c2s_memory_schemas
+        INSERT INTO memory_schemas
         (user_id, context_key, id, name, description, memory_ids, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
@@ -801,7 +972,7 @@ def save_project_memory_materialization(user_id: str, context_key: str, material
     c = conn.cursor()
     c.execute(
         """
-        INSERT OR REPLACE INTO c2s_memory_materializations
+        INSERT OR REPLACE INTO memory_materializations
         (user_id, context_key, materialization_id, memories_included, query, outcome, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
@@ -827,7 +998,7 @@ def record_project_memory_activity(user_id: str, context_key: str, session_id: s
     c = conn.cursor()
     c.execute(
         """
-        INSERT INTO c2s_memory_activity
+        INSERT INTO memory_activity
         (user_id, context_key, session_id, raw_input_hash, delta_batch, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,

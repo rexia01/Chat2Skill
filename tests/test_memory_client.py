@@ -205,9 +205,157 @@ class MemoryClientTests(unittest.TestCase):
             self.assertTrue(db_path.exists())
             self.assertFalse(list(context_dir.rglob("*.json")))
             conn = sqlite3.connect(str(db_path))
-            activity_count = conn.execute("SELECT COUNT(*) FROM c2s_memory_activity").fetchone()[0]
+            activity_count = conn.execute("SELECT COUNT(*) FROM memory_activity").fetchone()[0]
             conn.close()
             self.assertEqual(activity_count, 1)
+
+    def test_init_db_migrates_prefixed_memory_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
+            conn = sqlite3.connect(str(db_path))
+            conn.executescript(
+                """
+                CREATE TABLE memory_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    skill_name TEXT,
+                    item_type TEXT,
+                    title TEXT,
+                    description TEXT,
+                    content TEXT,
+                    evidence TEXT,
+                    source_session TEXT,
+                    confidence REAL,
+                    created_at TEXT
+                );
+                INSERT INTO memory_items
+                (user_id, skill_name, item_type, title, description, content, evidence, source_session, confidence, created_at)
+                VALUES ('user-1', 'skill-a', 'constraint', 'title', 'desc', 'content', 'evidence', 'session-a', 0.8, 'now');
+
+                CREATE TABLE c2s_memory_contexts (
+                    user_id TEXT NOT NULL,
+                    context_key TEXT NOT NULL,
+                    project_dir TEXT,
+                    core_memory TEXT,
+                    recent_raw_hashes TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    PRIMARY KEY (user_id, context_key)
+                );
+                INSERT INTO c2s_memory_contexts
+                VALUES ('user-1', 'project-a', '/repo/project', 'core', '[]', 'now', 'now');
+
+                CREATE TABLE c2s_memory_items (
+                    user_id TEXT NOT NULL,
+                    context_key TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    content TEXT,
+                    memory_type TEXT,
+                    section TEXT,
+                    salience REAL,
+                    confidence REAL,
+                    embedding TEXT,
+                    source_session TEXT,
+                    source_agent TEXT,
+                    recall_count INTEGER,
+                    hit_count INTEGER,
+                    miss_count INTEGER,
+                    is_active INTEGER,
+                    is_archived INTEGER,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    PRIMARY KEY (user_id, context_key, id)
+                );
+                INSERT INTO c2s_memory_items
+                VALUES ('user-1', 'project-a', 'm1', 'memory content', 'fact', 'general', 0.8, 0.9, '[]', 'session-a', 'agent', 0, 0, 0, 1, 0, 'now', 'now');
+
+                CREATE TABLE c2s_memory_schemas (
+                    user_id TEXT NOT NULL,
+                    context_key TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    name TEXT,
+                    description TEXT,
+                    memory_ids TEXT,
+                    created_at TEXT,
+                    PRIMARY KEY (user_id, context_key, id)
+                );
+                CREATE TABLE c2s_memory_materializations (
+                    user_id TEXT NOT NULL,
+                    context_key TEXT NOT NULL,
+                    materialization_id TEXT PRIMARY KEY,
+                    memories_included TEXT,
+                    query TEXT,
+                    outcome TEXT,
+                    created_at TEXT
+                );
+                CREATE TABLE c2s_memory_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    context_key TEXT NOT NULL,
+                    session_id TEXT,
+                    raw_input_hash TEXT,
+                    delta_batch TEXT,
+                    created_at TEXT
+                );
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            with patch.object(memory_client.storage, "DB_PATH", db_path):
+                with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                    memory_client.storage.init_db()
+                    conn = sqlite3.connect(str(db_path))
+                    tables = {
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        ).fetchall()
+                    }
+                    skill_count = conn.execute("SELECT COUNT(*) FROM skill_memory_items").fetchone()[0]
+                    memory_count = conn.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0]
+                    conn.close()
+
+            self.assertNotIn("c2s_memory_items", tables)
+            self.assertIn("skill_memory_items", tables)
+            self.assertIn("memory_items", tables)
+            self.assertEqual(skill_count, 1)
+            self.assertEqual(memory_count, 1)
+
+    def test_project_skill_is_saved_and_synced_from_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
+            project_dir = skill_dir / "user-1"
+            project_dir.mkdir(parents=True)
+            project_file = project_dir / "PROJECT_SKILL.md"
+            project_file.write_text(
+                "---\nname: project-skill\nlanguage: zh-Hans\n---\n\n# 项目技能",
+                encoding="utf-8",
+            )
+
+            with patch.object(memory_client.storage, "DB_PATH", db_path):
+                with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                    memory_client.storage.init_db()
+                    synced = memory_client.storage.load_project_skill("user-1")
+                    memory_client.storage.save_project_skill(
+                        "user-1",
+                        "---\nname: project-skill\nlanguage: en\n---\n\n# Project Skill",
+                        file_path=project_file,
+                        source_skill_count=3,
+                        source_memory_count=2,
+                    )
+                    saved = memory_client.storage.load_project_skill("user-1")
+
+            self.assertIsNotNone(synced)
+            self.assertIn("项目技能", synced["content"])
+            self.assertEqual(synced["language"], "zh-Hans")
+            self.assertEqual(saved["name"], "project-skill")
+            self.assertEqual(saved["language"], "en")
+            self.assertEqual(saved["source_skill_count"], 3)
+            self.assertEqual(saved["source_memory_count"], 2)
+            self.assertIn("Project Skill", saved["content"])
 
     def test_apply_memory_result_updates_existing_memory(self):
         context = {

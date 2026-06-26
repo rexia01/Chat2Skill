@@ -127,7 +127,7 @@ Stop hook ──► response guard ──► continue on violation
    ~/.chat2skill/ ◄───────┘                  your own LLM api key)
    skills + profile + history     ◄──────── skill + profile + replay
                                             POST /v1/project-skill
-UserPromptSubmit hook ◄── local retrieval   (project summary + detailed skills)
+UserPromptSubmit hook ◄── local retrieval   (project skill + detailed skills)
 ```
 
 - **Your data stays local.** Skills, profile, and history live in
@@ -137,7 +137,7 @@ UserPromptSubmit hook ◄── local retrieval   (project summary + detailed sk
   (OpenAI-compatible, e.g. OpenAI/DeepSeek). The key is sent with each
   request, used in memory, never persisted or logged server-side.
   Without a key, the server falls back to lower-quality heuristics.
-- **Response guard.** When a project summary contains a high-confidence
+- **Response guard.** When a project skill contains a high-confidence
   deterministic wording constraint, the Stop hook checks the final assistant
   message locally. The learned rule is evidence-based: verified facts must use
   definitive wording; evidence gaps must name the missing source material,
@@ -300,7 +300,7 @@ The Cursor plugin uses:
 - `hooks/cursor-hooks.json` for Cursor-format hooks.
 - `${CURSOR_PLUGIN_ROOT}` for installed plugin paths.
 - `.cursor/rules/chat2skill.mdc` as an always-on project rule.
-- `sessionStart` to provide the current project summary when Cursor
+- `sessionStart` to provide the current project skill when Cursor
   accepts hook context.
 - `stop` to learn from the newest Cursor agent transcript under
   `~/.cursor/projects/*/agent-transcripts/`.
@@ -396,9 +396,9 @@ adapter map.
 ```
 ~/.chat2skill/
 ├── config.json                  # endpoint + your LLM credentials
-├── c2s.db                       # conversations, skills, profile, project memory
+├── c2s.db                       # conversations, skills, project_skills, profile, project memory
 ├── skills/<user>/<name>/SKILL.md
-├── skills/<user>/PROJECT_SKILL.md   # human-readable project summary and response-guard input
+├── skills/<user>/PROJECT_SKILL.md   # human-readable project skill and response-guard input
 └── hook-events.log
 ```
 

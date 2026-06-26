@@ -48,9 +48,9 @@ def main() -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result.get("status") == "saved":
-            summary = runner.rebuild_project_summary(args.user_id, config)
-            if summary:
-                print(f"Project summary updated: {summary}")
+            project_skill = runner.rebuild_project_skill(args.user_id, config)
+            if project_skill:
+                print(f"Project skill updated: {project_skill}")
     return 0
 
 

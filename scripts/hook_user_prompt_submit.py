@@ -20,8 +20,8 @@ from chat2skill.hookio import (
 )
 from chat2skill.response_guard import reset_guard_state
 from chat2skill.retrieval import SkillRetriever
-from chat2skill.runner import PROJECT_SUMMARY_FILE, PROJECT_SUMMARY_NAME
-from chat2skill.storage import SKILL_DIR, init_db, load_skills, record_skill_usage
+from chat2skill.runner import LEGACY_PROJECT_SUMMARY_NAME, PROJECT_SKILL_FILE
+from chat2skill.storage import SKILL_DIR, init_db, load_project_skill, load_skills, record_skill_usage
 
 DETAIL_SKILL_TOP_K = 5
 DETAIL_SKILL_CHAR_LIMIT = 1800
@@ -101,16 +101,17 @@ def inject_memory_context(
 
 def inject_chat2skill_context(scoped_user_id: str, project_dir: str, prompt: str) -> int:
     init_db()
-    project_skill_path = SKILL_DIR / scoped_user_id / PROJECT_SUMMARY_FILE
-    project_skill = ""
-    if project_skill_path.exists():
+    project_skill_path = SKILL_DIR / scoped_user_id / PROJECT_SKILL_FILE
+    project_skill_record = load_project_skill(scoped_user_id)
+    project_skill = str((project_skill_record or {}).get("content") or "").strip()
+    if not project_skill and project_skill_path.exists():
         project_skill = project_skill_path.read_text(encoding="utf-8").strip()
 
     default_user = base_user_id()
     project_skills = [
         skill
         for skill in load_skills(scoped_user_id, include_pending=False)
-        if skill.name != PROJECT_SUMMARY_NAME
+        if skill.name != LEGACY_PROJECT_SUMMARY_NAME
     ]
     skills = list(project_skills)
     owners = {s.name: scoped_user_id for s in skills}
@@ -142,8 +143,8 @@ def inject_chat2skill_context(scoped_user_id: str, project_dir: str, prompt: str
     context_parts = []
     if project_skill:
         context_parts.append(
-            "## Chat2Skill Project Summary\n"
-            "Apply this project-level summary when relevant:\n\n"
+            "## Chat2Skill Project Skill\n"
+            "Apply this project-level skill when relevant:\n\n"
             f"{project_skill}"
         )
     if retrieved:
@@ -161,7 +162,7 @@ def inject_chat2skill_context(scoped_user_id: str, project_dir: str, prompt: str
         user_id=scoped_user_id,
         backend="chat2skill",
         retrieved=len(retrieved) + (1 if project_skill else 0),
-        included_project_summary=bool(project_skill),
+        included_project_skill=bool(project_skill),
         skills=[item.skill.name for item in retrieved],
     )
     return 0

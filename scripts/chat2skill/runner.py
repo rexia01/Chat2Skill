@@ -2,7 +2,7 @@
 
 Local responsibilities: parse the transcript, gather context (skills,
 profile, history), call the API, persist the returned records, refresh
-the project-level summary skill.
+the project-level skill.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ HISTORY_LIMIT = 20
 HISTORY_MESSAGES_PER_CONV = 30
 HISTORY_CHARS_PER_MESSAGE = 2000
 EXISTING_SKILLS_LIMIT = 30
-PROJECT_SUMMARY_FILE = "PROJECT_SKILL.md"
-PROJECT_SUMMARY_NAME = "project-chat2skill-summary"
+PROJECT_SKILL_FILE = "PROJECT_SKILL.md"
+PROJECT_SKILL_NAME = "project-skill"
+LEGACY_PROJECT_SUMMARY_NAME = "project-chat2skill-summary"
 
 
 def run_extraction(
@@ -95,17 +96,17 @@ def run_extraction(
     }
 
 
-def rebuild_project_summary(
+def rebuild_project_skill(
     user_id: str,
     config: dict,
     recent_messages: Optional[List[dict]] = None,
 ) -> Optional[Path]:
-    """Refresh PROJECT_SKILL.md from the user's active skills."""
+    """Refresh the project-level PROJECT_SKILL.md from active local skills."""
     storage.init_db()
     skills = [
         skill
         for skill in storage.load_skills(user_id, include_pending=False)
-        if skill.status == "active" and skill.name != PROJECT_SUMMARY_NAME
+        if skill.status == "active" and skill.name not in {PROJECT_SKILL_NAME, LEGACY_PROJECT_SUMMARY_NAME}
     ]
     if not skills:
         return None
@@ -121,9 +122,25 @@ def rebuild_project_summary(
 
     out_dir = storage.SKILL_DIR / user_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / PROJECT_SUMMARY_FILE
-    out_path.write_text(response["content"], encoding="utf-8")
+    out_path = out_dir / PROJECT_SKILL_FILE
+    content = response["content"]
+    out_path.write_text(content, encoding="utf-8")
+    storage.save_project_skill(
+        user_id,
+        content,
+        file_path=out_path,
+        source_skill_count=len(skills),
+    )
     return out_path
+
+
+def rebuild_project_summary(
+    user_id: str,
+    config: dict,
+    recent_messages: Optional[List[dict]] = None,
+) -> Optional[Path]:
+    """Compatibility wrapper for older callers."""
+    return rebuild_project_skill(user_id, config, recent_messages)
 
 
 def run_maintenance(user_id: str) -> dict:
@@ -167,7 +184,11 @@ def _history_samples(user_id: str, exclude_session_id: str) -> List[dict]:
 def _existing_summary_language(user_id: str) -> Optional[str]:
     import re
 
-    path = storage.SKILL_DIR / user_id / PROJECT_SUMMARY_FILE
+    project_skill = storage.load_project_skill(user_id)
+    if project_skill and project_skill.get("language"):
+        return str(project_skill["language"])
+
+    path = storage.SKILL_DIR / user_id / PROJECT_SKILL_FILE
     if not path.exists():
         return None
     try:
