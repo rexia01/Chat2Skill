@@ -136,6 +136,26 @@ def init_db():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS project_skill_sources (
+            user_id TEXT NOT NULL,
+            project_skill_version INTEGER NOT NULL,
+            skill_name TEXT NOT NULL,
+            skill_type TEXT,
+            confidence REAL,
+            evidence_count INTEGER,
+            source_memory_count INTEGER,
+            created_at TEXT,
+            PRIMARY KEY (user_id, project_skill_version, skill_name)
+        )
+    """)
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_project_skill_sources_user_version
+        ON project_skill_sources (user_id, project_skill_version)
+        """
+    )
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS skill_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -372,6 +392,73 @@ def save_project_skill(
     )
     conn.commit()
     conn.close()
+
+
+def save_project_skill_sources(
+    user_id: str,
+    project_skill_version: int,
+    sources: List[dict],
+):
+    now = datetime.now().isoformat()
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute(
+        """
+        DELETE FROM project_skill_sources
+        WHERE user_id = ? AND project_skill_version = ?
+        """,
+        (user_id, project_skill_version),
+    )
+    c.executemany(
+        """
+        INSERT INTO project_skill_sources
+        (user_id, project_skill_version, skill_name, skill_type, confidence,
+         evidence_count, source_memory_count, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                user_id,
+                project_skill_version,
+                source.get("skill_name"),
+                source.get("skill_type"),
+                source.get("confidence"),
+                source.get("evidence_count"),
+                source.get("source_memory_count"),
+                now,
+            )
+            for source in sources
+            if source.get("skill_name")
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_project_skill_sources(
+    user_id: str,
+    project_skill_version: Optional[int] = None,
+) -> List[dict]:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    params: list = [user_id]
+    where = "WHERE user_id = ?"
+    if project_skill_version is not None:
+        where += " AND project_skill_version = ?"
+        params.append(project_skill_version)
+    rows = c.execute(
+        f"""
+        SELECT project_skill_version, skill_name, skill_type, confidence,
+               evidence_count, source_memory_count, created_at
+        FROM project_skill_sources
+        {where}
+        ORDER BY project_skill_version DESC, skill_name
+        """,
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 
 def load_project_skill(user_id: str) -> Optional[dict]:

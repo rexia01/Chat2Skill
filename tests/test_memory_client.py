@@ -464,6 +464,7 @@ class MemoryClientTests(unittest.TestCase):
                     payload = project_skill.call_args.args[1]
                     skill_payload = payload["skills"][0]
                     saved = runner.storage.load_project_skill("user-1")
+                    sources = runner.storage.load_project_skill_sources("user-1")
 
             assert saved is not None
             self.assertEqual(len(skill_payload["content"]), 2215)
@@ -472,6 +473,10 @@ class MemoryClientTests(unittest.TestCase):
             self.assertEqual(skill_payload["memory_items"][0]["item_type"], "constraint")
             self.assertEqual(skill_payload["memory_items"][0]["title"], "Keep rollback")
             self.assertEqual(saved["source_memory_count"], 2)
+            self.assertEqual(len(sources), 1)
+            self.assertEqual(sources[0]["skill_name"], "deploy-process")
+            self.assertEqual(sources[0]["project_skill_version"], saved["version"])
+            self.assertEqual(sources[0]["source_memory_count"], 2)
 
     def test_stop_worker_rebuilds_project_skill_after_memory_saved(self):
         with tempfile.TemporaryDirectory() as tmp:

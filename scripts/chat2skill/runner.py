@@ -109,6 +109,13 @@ def rebuild_project_skill(
         source_skill_count=len(skills),
         source_memory_count=source_memory_count,
     )
+    saved = storage.load_project_skill(user_id)
+    if saved and saved.get("version") is not None:
+        storage.save_project_skill_sources(
+            user_id,
+            int(saved["version"]),
+            _project_skill_source_rows(skills, memory_items_by_skill),
+        )
     return out_path
 
 
@@ -167,6 +174,22 @@ def _project_skill_payload(skill: Skill, memory_items: Optional[list[dict]] = No
     payload["embedding_vector"] = []
     payload["memory_items"] = _compact_project_skill_memory_items(memory_items or [])
     return payload
+
+
+def _project_skill_source_rows(
+    skills: list[Skill],
+    memory_items_by_skill: dict[str, list[dict]],
+) -> list[dict]:
+    return [
+        {
+            "skill_name": skill.name,
+            "skill_type": skill.skill_type,
+            "confidence": skill.confidence,
+            "evidence_count": skill.evidence_count,
+            "source_memory_count": len(memory_items_by_skill.get(skill.name, [])),
+        }
+        for skill in skills
+    ]
 
 
 def _compact_project_skill_memory_items(items: list[dict]) -> list[dict]:
