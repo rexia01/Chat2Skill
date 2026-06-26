@@ -1,14 +1,13 @@
 # Chat2Skill
 
-Automatically learn reusable skills from your assistant conversations.
+Automatically learn reusable skills and project memory from your assistant conversations.
 
 After each session, Chat2Skill analyzes the conversation for corrections,
-preferences, and constraints, distills them into `SKILL.md` files, and
-injects the relevant ones into your future sessions — so your agent stops
-repeating the same mistakes. It is domain-general: coding workflows are the
-first-class integration target, while the same mechanism works for support,
-research, writing, operations, sales, education, and other assistant domains
-that produce usable transcripts.
+preferences, constraints, and project facts, distills them into local memory
+and `SKILL.md` files, and injects the relevant ones into your future sessions.
+It is domain-general: coding workflows are the first-class integration target,
+while the same mechanism works for support, research, writing, operations,
+sales, education, and other assistant domains that produce usable transcripts.
 
 Works best with **Claude Code**, **Codex**, and **Cursor**. Other agents
 can use Chat2Skill when they support lifecycle hooks or can run the
@@ -17,12 +16,15 @@ included CLI scripts.
 
 ## What the Algorithm Produces
 
-Chat2Skill extracts two levels of reusable guidance:
+Chat2Skill extracts reusable project context in two stores:
 
 - **Atomized skills**: focused `SKILL.md` files for one interaction preference,
   procedure, constraint, success pattern, or failure pattern.
+- **Project memory**: Engram-style project facts, decisions, procedures, and
+  warnings stored in the local SQLite database and retrieved dynamically.
 - **Project skill**: a synthesized `PROJECT_SKILL.md` that merges active
-  atomized skills into a compact project-level instruction file.
+  atomized skills into a compact project-level instruction file for human
+  review and response-guard policy.
 
 A skill is not meant to remember one transcript. It captures a generalizable
 behavior that would change future assistant behavior across similar situations.
@@ -43,12 +45,12 @@ behavior that would change future assistant behavior across similar situations.
 
 ```text
 +---------------------------------------------------------+
-| 1. Retrieve active skills for the next assistant session |
+| 1. Retrieve relevant project memory and active skills    |
 +---------------------------+-----------------------------+
                             |
                             v
 +---------------------------------------------------------+
-| 2. Inject relevant skills / PROJECT_SKILL.md into prompt |
+| 2. Inject retrieved project memory + skills into prompt  |
 +---------------------------+-----------------------------+
                             |
                             v
@@ -73,16 +75,16 @@ behavior that would change future assistant behavior across similar situations.
                             |
                             v
 +---------------------------------------------------------+
-| 7. Rebuild PROJECT_SKILL.md and update user profile      |
+| 7. Rebuild PROJECT_SKILL.md and update local profile     |
 +---------------------------+-----------------------------+
                             |
                             +------------- back to step 1
 ```
 
 The algorithm is a feedback loop, not a one-shot workflow. Each completed
-session can change the skill bank; the next session retrieves from that updated
-bank; later user feedback reinforces, edits, rejects, or ages out earlier
-skills.
+session can change project memory and the skill bank; the next session retrieves
+from those updated local stores; later user feedback reinforces, edits, rejects,
+or ages out earlier context.
 
 There is still a single extraction pass inside the loop. That pass is:
 
@@ -162,17 +164,16 @@ cp config.example.json ~/.chat2skill/config.json
 # edit ~/.chat2skill/config.json: set api_url and llm.api_key
 ```
 
-Use one config file. The default backend is `memory`, which calls the
-stateless Chat2Skill learn API for extraction and stores returned project
-memory, conversations, skills, and profiles in `~/.chat2skill/c2s.db`.
-Prompt retrieval runs locally from that database; rendered skill files stay
-under `~/.chat2skill/skills/`.
+Use one config file. Chat2Skill calls the stateless learn API for extraction
+and stores returned project memory, conversations, skills, and profiles in
+`~/.chat2skill/c2s.db`. Prompt retrieval runs locally from that database and
+always injects retrieved project memory plus relevant skills. Rendered skill
+files stay under `~/.chat2skill/skills/`.
 
 For OpenAI-compatible models, write `~/.chat2skill/config.json` like this:
 
 ```json
 {
-  "backend": "memory",
   "api_url": "https://api.chat2skill.com",
   "user_id": "alice",
   "memory": {
@@ -196,7 +197,6 @@ For DeepSeek, write `~/.chat2skill/config.json` like this:
 
 ```json
 {
-  "backend": "memory",
   "api_url": "https://api.chat2skill.com",
   "user_id": "alice",
   "memory": {
@@ -221,8 +221,7 @@ variables if you prefer shell config or need to override the JSON file.
 
 | Environment variable | JSON key | Default | Description |
 | --- | --- | --- | --- |
-| `CHAT2SKILL_BACKEND` | `backend` | `memory` | Backend used by hooks. Use `memory` for unified memory+skills, or `chat2skill` for the legacy skill-only flow. |
-| `CHAT2SKILL_API_URL` | `api_url` | `https://api.chat2skill.com` | Chat2Skill API endpoint used for stateless learn/extract calls and legacy extraction. |
+| `CHAT2SKILL_API_URL` | `api_url` | `https://api.chat2skill.com` | Chat2Skill API endpoint used for stateless learn/extract calls. |
 | `CHAT2SKILL_MEMORY_TARGET_MODEL` | `memory.target_model` | `claude` | Reserved renderer target for API-compatible payloads. |
 | `CHAT2SKILL_MEMORY_TOKEN_BUDGET` | `memory.token_budget` | `4000` | Total prompt-injection token budget for memory plus skills. |
 | `CHAT2SKILL_MEMORY_MEMORY_RATIO` | `memory.memory_ratio` | `0.6` | Fraction of retrieval budget initially allocated to memory. |

@@ -1,4 +1,4 @@
-"""Unified Memory backend adapter for Chat2Skill hooks.
+"""Unified memory and skills adapter for Chat2Skill hooks.
 
 This adapter matches the stateless c2s-algorithm API:
 - local plugin storage owns memory state in ~/.chat2skill/c2s.db
@@ -97,7 +97,7 @@ def commit_transcript(
     """Commit one transcript to unified memory + skill learning."""
     messages = parse_transcript(session_file, clean=clean)
     if len(messages) < 2:
-        return {"status": "skipped", "backend": "memory", "reason": "too_few_messages"}
+        return {"status": "skipped", "mode": "unified", "reason": "too_few_messages"}
 
     storage.init_db()
     session_id = session_file.stem
@@ -133,7 +133,7 @@ def commit_transcript(
     skill_status = _persist_skill_response(response.get("skills") or {}, user_id)
     return {
         "status": skill_status["status"],
-        "backend": "memory",
+        "mode": "unified",
         "memory": {
             "context_path": str(context_path),
             "memories_added": memory.get("memories_added", 0),

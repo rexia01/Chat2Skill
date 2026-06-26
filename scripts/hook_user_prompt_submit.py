@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from chat2skill.config import backend_name, base_user_id, load_config
+from chat2skill.config import load_config
 from chat2skill.memory_client import MemoryClientError, materialize_for_prompt
 from chat2skill.hookio import (
     json_hook_output,
@@ -19,13 +19,7 @@ from chat2skill.hookio import (
     read_hook_input,
 )
 from chat2skill.response_guard import reset_guard_state
-from chat2skill.retrieval import SkillRetriever
-from chat2skill.runner import LEGACY_PROJECT_SUMMARY_NAME, PROJECT_SKILL_FILE
-from chat2skill.storage import SKILL_DIR, init_db, load_project_skill, load_skills, record_skill_usage
-
-DETAIL_SKILL_TOP_K = 5
-DETAIL_SKILL_CHAR_LIMIT = 1800
-DETAIL_TOTAL_CHAR_LIMIT = 7000
+from chat2skill.storage import record_skill_usage
 
 
 def main() -> int:
@@ -41,10 +35,7 @@ def main() -> int:
         prompt_preview=prompt[:160],
     )
 
-    config = load_config()
-    if backend_name(config) == "memory":
-        return inject_memory_context(config, project_dir, scoped_user_id, prompt)
-    return inject_chat2skill_context(scoped_user_id, project_dir, prompt)
+    return inject_memory_context(load_config(), project_dir, scoped_user_id, prompt)
 
 
 def inject_memory_context(
@@ -70,7 +61,7 @@ def inject_memory_context(
             "UserPromptSubmit.done",
             project_dir=project_dir,
             user_id=scoped_user_id,
-            backend="memory",
+            mode="unified",
             retrieved=0,
         )
         return 0
@@ -89,7 +80,7 @@ def inject_memory_context(
         "UserPromptSubmit.done",
         project_dir=project_dir,
         user_id=scoped_user_id,
-        backend="memory",
+        mode="unified",
         materialization_id=result.get("materialization_id"),
         token_count=result.get("token_count"),
         coverage_score=(result.get("memory") or {}).get("coverage_score"),
@@ -97,95 +88,6 @@ def inject_memory_context(
         skills=included_skills,
     )
     return 0
-
-
-def inject_chat2skill_context(scoped_user_id: str, project_dir: str, prompt: str) -> int:
-    init_db()
-    project_skill_path = SKILL_DIR / scoped_user_id / PROJECT_SKILL_FILE
-    project_skill_record = load_project_skill(scoped_user_id)
-    project_skill = str((project_skill_record or {}).get("content") or "").strip()
-    if not project_skill and project_skill_path.exists():
-        project_skill = project_skill_path.read_text(encoding="utf-8").strip()
-
-    default_user = base_user_id()
-    project_skills = [
-        skill
-        for skill in load_skills(scoped_user_id, include_pending=False)
-        if skill.name != LEGACY_PROJECT_SUMMARY_NAME
-    ]
-    skills = list(project_skills)
-    owners = {s.name: scoped_user_id for s in skills}
-    if default_user != scoped_user_id:
-        for skill in load_skills(default_user, include_pending=False):
-            owners.setdefault(skill.name, default_user)
-            skills.append(skill)
-
-    retriever = SkillRetriever()
-    retrieved = retriever.retrieve(prompt, skills, top_k=DETAIL_SKILL_TOP_K, active_only=True)
-    if not retrieved and not project_skill:
-        log_event(
-            "UserPromptSubmit.done",
-            project_dir=project_dir,
-            user_id=scoped_user_id,
-            retrieved=0,
-        )
-        return 0
-
-    by_owner: dict[str, list[str]] = {}
-    for item in retrieved:
-        owner = owners.get(item.skill.name, scoped_user_id)
-        by_owner.setdefault(owner, []).append(item.skill.name)
-    if project_skill:
-        by_owner.setdefault(scoped_user_id, []).extend(skill.name for skill in project_skills)
-    for owner, names in by_owner.items():
-        record_skill_usage(owner, names)
-
-    context_parts = []
-    if project_skill:
-        context_parts.append(
-            "## Chat2Skill Project Skill\n"
-            "Apply this project-level skill when relevant:\n\n"
-            f"{project_skill}"
-        )
-    if retrieved:
-        context_parts.append(
-            "## Chat2Skill Retrieved Detailed Skills\n"
-            "These are the concrete skills most relevant to the current prompt. "
-            "Use their checklist/procedure/pitfalls as binding task guidance when relevant:\n\n"
-            f"{format_detailed_skills(retrieved)}"
-        )
-    context_parts.append(f"Project skill namespace: {scoped_user_id}")
-    json_hook_output("\n\n".join(context_parts))
-    log_event(
-        "UserPromptSubmit.done",
-        project_dir=project_dir,
-        user_id=scoped_user_id,
-        backend="chat2skill",
-        retrieved=len(retrieved) + (1 if project_skill else 0),
-        included_project_skill=bool(project_skill),
-        skills=[item.skill.name for item in retrieved],
-    )
-    return 0
-
-
-def format_detailed_skills(retrieved) -> str:
-    sections = []
-    used_chars = 0
-    for item in retrieved:
-        skill = item.skill
-        content = (skill.content or "").strip()
-        if len(content) > DETAIL_SKILL_CHAR_LIMIT:
-            content = content[:DETAIL_SKILL_CHAR_LIMIT].rstrip() + "\n...[truncated]"
-        section = (
-            f"### {skill.name} score={item.score:.3f}\n"
-            f"Description: {skill.description}\n\n"
-            f"{content}"
-        )
-        if used_chars + len(section) > DETAIL_TOTAL_CHAR_LIMIT and sections:
-            break
-        sections.append(section)
-        used_chars += len(section)
-    return "\n\n".join(sections)
 
 
 if __name__ == "__main__":

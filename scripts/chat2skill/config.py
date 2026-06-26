@@ -18,8 +18,6 @@ CONFIG_PATH = DATA_HOME / "config.json"
 CONTEXTS_DIR = DATA_HOME / "contexts"
 
 DEFAULT_API_URL = "https://api.chat2skill.com"
-DEFAULT_BACKEND = "memory"
-BACKENDS = {"chat2skill", "memory"}
 
 
 def load_config() -> dict:
@@ -31,10 +29,6 @@ def load_config() -> dict:
             config = {}
 
     # Environment variables override the file.
-    backend = os.environ.get("CHAT2SKILL_BACKEND") or config.get("backend") or DEFAULT_BACKEND
-    backend = str(backend).strip().lower()
-    config["backend"] = backend if backend in BACKENDS else DEFAULT_BACKEND
-
     config.setdefault("api_url", DEFAULT_API_URL)
     if os.environ.get("CHAT2SKILL_API_URL"):
         config["api_url"] = os.environ["CHAT2SKILL_API_URL"]
@@ -95,12 +89,6 @@ def llm_payload(config: dict) -> Optional[dict]:
 def base_user_id(config: Optional[dict] = None) -> str:
     config = config or load_config()
     return config.get("user_id") or _safe_username() or "default"
-
-
-def backend_name(config: Optional[dict] = None) -> str:
-    config = config or load_config()
-    backend = str(config.get("backend") or DEFAULT_BACKEND).strip().lower()
-    return backend if backend in BACKENDS else DEFAULT_BACKEND
 
 
 def _safe_username() -> str:

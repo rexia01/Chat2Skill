@@ -19,7 +19,6 @@ import process_stop_queue
 
 def _config() -> dict:
     return {
-        "backend": "memory",
         "api_url": "https://api.example.test",
         "memory": {
             "target_model": "generic",
@@ -350,6 +349,8 @@ class MemoryClientTests(unittest.TestCase):
                     saved = memory_client.storage.load_project_skill("user-1")
 
             self.assertIsNotNone(synced)
+            assert synced is not None
+            assert saved is not None
             self.assertIn("Project Skill", synced["content"])
             self.assertEqual(synced["language"], "en")
             self.assertEqual(saved["name"], "project-skill")
@@ -401,6 +402,7 @@ class MemoryClientTests(unittest.TestCase):
                     saved = runner.storage.load_project_skill("user-1")
 
             self.assertEqual(project_file.read_text(encoding="utf-8"), original_content)
+            assert saved is not None
             self.assertEqual(saved["content"], original_content)
 
     def test_rebuild_project_skill_sends_compact_skill_evidence(self):
@@ -463,6 +465,7 @@ class MemoryClientTests(unittest.TestCase):
                     skill_payload = payload["skills"][0]
                     saved = runner.storage.load_project_skill("user-1")
 
+            assert saved is not None
             self.assertEqual(len(skill_payload["content"]), 2215)
             self.assertTrue(skill_payload["content"].endswith("\n...[truncated]"))
             self.assertEqual(skill_payload["embedding_vector"], [])

@@ -1,5 +1,4 @@
 {
-  "backend": "memory",
   "memory": {
     "target_model": "claude",
     "token_budget": 4000,

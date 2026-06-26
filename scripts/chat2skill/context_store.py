@@ -1,4 +1,4 @@
-"""Local project memory context store for the unified Memory backend."""
+"""Local project memory context store for unified memory and skills."""
 
 from __future__ import annotations
 
