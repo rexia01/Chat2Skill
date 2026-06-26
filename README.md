@@ -163,8 +163,9 @@ cp config.example.json ~/.chat2skill/config.json
 ```
 
 Use one config file. The default backend is `memory`, which calls the unified
-Chat2Skill API and stores returned project memory under
-`~/.chat2skill/contexts/`. Skills stay under `~/.chat2skill/skills/`.
+Chat2Skill API and stores returned project memory, conversations, skills, and
+profiles in `~/.chat2skill/c2s.db`. Rendered skill files stay under
+`~/.chat2skill/skills/`.
 
 For OpenAI-compatible models, write `~/.chat2skill/config.json` like this:
 
@@ -388,7 +389,7 @@ adapter map.
 ```
 ~/.chat2skill/
 ├── config.json                  # endpoint + your LLM credentials
-├── chat2skill.db                # conversations, skills, profile
+├── c2s.db                       # conversations, skills, profile, project memory
 ├── skills/<user>/<name>/SKILL.md
 ├── skills/<user>/PROJECT_SKILL.md   # injected before each conversation and read by response guard
 └── hook-events.log

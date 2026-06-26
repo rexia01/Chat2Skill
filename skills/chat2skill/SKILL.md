@@ -12,7 +12,7 @@ Use this skill when the user asks to:
 ## Local Data
 All learned data lives under `~/.chat2skill/` (override with `CHAT2SKILL_HOME`):
 - `config.json` — API endpoint and the user's own LLM credentials
-- `chat2skill.db` — conversations, skills, profile (SQLite)
+- `c2s.db` — conversations, skills, profile, project memory, materialization receipts, activity ledger (SQLite)
 - `skills/<user_id>/<skill-name>/SKILL.md` — generated skills
 - `skills/<user_id>/PROJECT_SKILL.md` — project-level summary
 - `hook-events.log` — hook activity log

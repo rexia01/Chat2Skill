@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,8 @@ class MemoryClientTests(unittest.TestCase):
     def test_materialize_calls_unified_retrieve_and_records_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             context_dir = Path(tmp) / "contexts"
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
             calls = []
 
             def fake_retrieve(api_url, payload):
@@ -43,27 +46,33 @@ class MemoryClientTests(unittest.TestCase):
                     "materialization_id": "mat-1",
                     "token_count": 10,
                     "memory": {
-                        "bullets_included": ["b1"],
+                        "memories_included": ["b1"],
                         "coverage_score": 1.0,
                     },
                     "skills": {"skills_included": []},
                 }
 
             with patch("chat2skill.context_store.CONTEXTS_DIR", context_dir):
-                with patch.object(memory_client.api_client, "unified_retrieve", side_effect=fake_retrieve):
-                    result = memory_client.materialize_for_prompt(
-                        _config(), "/repo/project", "current task", "user-1"
-                    )
-                context = load_context("/repo/project", "user-1")
+                with patch.object(memory_client.storage, "DB_PATH", db_path):
+                    with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                        with patch.object(memory_client.api_client, "unified_retrieve", side_effect=fake_retrieve):
+                            result = memory_client.materialize_for_prompt(
+                                _config(), "/repo/project", "current task", "user-1"
+                            )
+                        context = load_context("/repo/project", "user-1")
 
             self.assertEqual(result["materialization_id"], "mat-1")
             self.assertEqual(context["last_materialization"]["materialization_id"], "mat-1")
-            self.assertEqual(context["last_materialization"]["bullets_included"], ["b1"])
-            self.assertEqual(calls[0][1]["existing_memory"]["bullets"], [])
+            self.assertEqual(context["last_materialization"]["memories_included"], ["b1"])
+            self.assertEqual(calls[0][1]["existing_memory"]["memories"], [])
+            self.assertTrue(db_path.exists())
+            self.assertFalse(list(context_dir.rglob("*.json")))
 
     def test_commit_transcript_calls_unified_learn_and_applies_memory_delta(self):
         with tempfile.TemporaryDirectory() as tmp:
             context_dir = Path(tmp) / "contexts"
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
             transcript = Path(tmp) / "session.jsonl"
             transcript.write_text(
                 "\n".join(
@@ -100,11 +109,11 @@ class MemoryClientTests(unittest.TestCase):
                             "trigger": "commit",
                             "operations": [
                                 {
-                                    "op_type": "add_bullet",
+                                    "op_type": "add_memory",
                                     "target_id": "b1",
                                     "section": "deployment",
                                     "content": "EC2 deploy is durable memory.",
-                                    "bullet_type": "fact",
+                                    "memory_type": "fact",
                                     "confidence": 0.8,
                                     "previous_state": {},
                                 }
@@ -112,7 +121,7 @@ class MemoryClientTests(unittest.TestCase):
                         },
                         "core_memory_update": "Project uses EC2 deploy.",
                         "raw_input_hash": "hash-1",
-                        "bullets_added": 1,
+                        "memories_added": 1,
                     },
                     "skills": {
                         "skill": None,
@@ -128,23 +137,32 @@ class MemoryClientTests(unittest.TestCase):
                 }
 
             with patch("chat2skill.context_store.CONTEXTS_DIR", context_dir):
-                with patch.object(memory_client.api_client, "unified_learn", side_effect=fake_learn):
-                    result = memory_client.commit_transcript(
-                        transcript, "user-1", _config(), project_dir="/repo/project"
-                    )
-                context = load_context("/repo/project", "user-1")
+                with patch.object(memory_client.storage, "DB_PATH", db_path):
+                    with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                        with patch.object(memory_client.api_client, "unified_learn", side_effect=fake_learn):
+                            result = memory_client.commit_transcript(
+                                transcript, "user-1", _config(), project_dir="/repo/project"
+                            )
+                        context = load_context("/repo/project", "user-1")
 
             self.assertEqual(result["status"], "memory_saved")
-            self.assertEqual(result["memory"]["bullets_added"], 1)
+            self.assertEqual(result["memory"]["memories_added"], 1)
+            self.assertEqual(result["memory"]["context_path"], str(db_path))
             self.assertEqual(context["core_memory"], "Project uses EC2 deploy.")
-            self.assertEqual(context["bullets"][0]["id"], "b1")
+            self.assertEqual(context["memories"][0]["id"], "b1")
             self.assertEqual(context["recent_raw_hashes"], ["hash-1"])
             self.assertEqual(calls[0][1]["messages"][0]["content"], "remember EC2 deploy")
+            self.assertTrue(db_path.exists())
+            self.assertFalse(list(context_dir.rglob("*.json")))
+            conn = sqlite3.connect(str(db_path))
+            activity_count = conn.execute("SELECT COUNT(*) FROM c2s_memory_activity").fetchone()[0]
+            conn.close()
+            self.assertEqual(activity_count, 1)
 
-    def test_apply_memory_result_updates_existing_bullet(self):
+    def test_apply_memory_result_updates_existing_memory(self):
         context = {
             "core_memory": "",
-            "bullets": [{"id": "b1", "content": "old", "confidence": 0.3}],
+            "memories": [{"id": "b1", "content": "old", "confidence": 0.3}],
             "schemas": [],
             "recent_raw_hashes": [],
         }
@@ -154,7 +172,7 @@ class MemoryClientTests(unittest.TestCase):
                 "delta_batch": {
                     "operations": [
                         {
-                            "op_type": "update_bullet",
+                            "op_type": "update_memory",
                             "target_id": "b1",
                             "content": "new",
                             "confidence": 0.9,
@@ -163,8 +181,8 @@ class MemoryClientTests(unittest.TestCase):
                 }
             },
         )
-        self.assertEqual(updated["bullets"][0]["content"], "new")
-        self.assertEqual(updated["bullets"][0]["confidence"], 0.9)
+        self.assertEqual(updated["memories"][0]["content"], "new")
+        self.assertEqual(updated["memories"][0]["confidence"], 0.9)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,8 @@ from .similarity import (
     tokens as _tokens,
 )
 
-DB_PATH = DATA_HOME / "chat2skill.db"
+DB_PATH = DATA_HOME / "c2s.db"
+LEGACY_DB_PATH = DATA_HOME / "chat2skill.db"
 SKILL_DIR = DATA_HOME / "skills"
 
 
@@ -27,6 +28,7 @@ def init_db():
     """Initialize SQLite database."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     SKILL_DIR.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_db()
     
     conn = sqlite3.connect(str(DB_PATH))
     c = conn.cursor()
@@ -128,6 +130,78 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_skill_usage_user ON skill_usage (user_id, used_at)")
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS c2s_memory_contexts (
+            user_id TEXT NOT NULL,
+            context_key TEXT NOT NULL,
+            project_dir TEXT,
+            core_memory TEXT,
+            recent_raw_hashes TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            PRIMARY KEY (user_id, context_key)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS c2s_memory_items (
+            user_id TEXT NOT NULL,
+            context_key TEXT NOT NULL,
+            id TEXT NOT NULL,
+            content TEXT,
+            memory_type TEXT,
+            section TEXT,
+            salience REAL,
+            confidence REAL,
+            embedding TEXT,
+            source_session TEXT,
+            source_agent TEXT,
+            recall_count INTEGER,
+            hit_count INTEGER,
+            miss_count INTEGER,
+            is_active INTEGER,
+            is_archived INTEGER,
+            created_at TEXT,
+            updated_at TEXT,
+            PRIMARY KEY (user_id, context_key, id)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS c2s_memory_schemas (
+            user_id TEXT NOT NULL,
+            context_key TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT,
+            description TEXT,
+            memory_ids TEXT,
+            created_at TEXT,
+            PRIMARY KEY (user_id, context_key, id)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS c2s_memory_materializations (
+            user_id TEXT NOT NULL,
+            context_key TEXT NOT NULL,
+            materialization_id TEXT PRIMARY KEY,
+            memories_included TEXT,
+            query TEXT,
+            outcome TEXT,
+            created_at TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS c2s_memory_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            context_key TEXT NOT NULL,
+            session_id TEXT,
+            raw_input_hash TEXT,
+            delta_batch TEXT,
+            created_at TEXT
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_c2s_memory_context ON c2s_memory_items (user_id, context_key)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_c2s_memory_activity ON c2s_memory_activity (user_id, context_key, created_at)")
+
+    c.execute("""
         INSERT OR IGNORE INTO skill_records
         (user_id, name, description, content, version, source_sessions, created_at,
          updated_at, skill_type, scope, evidence_count, confidence, status,
@@ -144,6 +218,12 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+
+def _migrate_legacy_db():
+    if DB_PATH.exists() or not LEGACY_DB_PATH.exists():
+        return
+    LEGACY_DB_PATH.replace(DB_PATH)
 
 
 def _ensure_column(cursor, table: str, column: str, column_type: str):
@@ -585,6 +665,258 @@ def save_user_profile(profile: UserModel):
     )
     conn.commit()
     conn.close()
+
+
+def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict]:
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    context_row = c.execute(
+        """
+        SELECT project_dir, core_memory, recent_raw_hashes
+        FROM c2s_memory_contexts
+        WHERE user_id = ? AND context_key = ?
+        """,
+        (user_id, context_key),
+    ).fetchone()
+    if not context_row:
+        conn.close()
+        return None
+
+    item_rows = c.execute(
+        """
+        SELECT id, content, memory_type, section, salience, confidence, embedding,
+               source_session, source_agent, recall_count, hit_count, miss_count,
+               is_active, is_archived, created_at, updated_at
+        FROM c2s_memory_items
+        WHERE user_id = ? AND context_key = ?
+        ORDER BY created_at, id
+        """,
+        (user_id, context_key),
+    ).fetchall()
+    schema_rows = c.execute(
+        """
+        SELECT id, name, description, memory_ids, created_at
+        FROM c2s_memory_schemas
+        WHERE user_id = ? AND context_key = ?
+        ORDER BY created_at, id
+        """,
+        (user_id, context_key),
+    ).fetchall()
+    materialization_row = c.execute(
+        """
+        SELECT materialization_id, memories_included, query, outcome
+        FROM c2s_memory_materializations
+        WHERE user_id = ? AND context_key = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (user_id, context_key),
+    ).fetchone()
+    conn.close()
+
+    return {
+        "version": 1,
+        "project_dir": context_row[0] or "",
+        "user_id": user_id,
+        "core_memory": context_row[1] or "",
+        "memories": [_memory_item_from_row(row) for row in item_rows],
+        "schemas": [_memory_schema_from_row(row) for row in schema_rows],
+        "recent_raw_hashes": _json_list(context_row[2]),
+        "last_materialization": _materialization_from_row(materialization_row),
+    }
+
+
+def save_project_memory_context(user_id: str, context_key: str, context: dict):
+    now = datetime.now().isoformat()
+    project_dir = context.get("project_dir", "")
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO c2s_memory_contexts
+        (user_id, context_key, project_dir, core_memory, recent_raw_hashes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, context_key) DO UPDATE SET
+            project_dir = excluded.project_dir,
+            core_memory = excluded.core_memory,
+            recent_raw_hashes = excluded.recent_raw_hashes,
+            updated_at = excluded.updated_at
+        """,
+        (
+            user_id,
+            context_key,
+            project_dir,
+            context.get("core_memory", ""),
+            json.dumps(context.get("recent_raw_hashes") or [], ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+    c.execute("DELETE FROM c2s_memory_items WHERE user_id = ? AND context_key = ?", (user_id, context_key))
+    c.executemany(
+        """
+        INSERT INTO c2s_memory_items
+        (user_id, context_key, id, content, memory_type, section, salience, confidence,
+         embedding, source_session, source_agent, recall_count, hit_count, miss_count,
+         is_active, is_archived, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            _memory_item_to_row(user_id, context_key, item, now)
+            for item in context.get("memories") or []
+            if item.get("id")
+        ],
+    )
+    c.execute("DELETE FROM c2s_memory_schemas WHERE user_id = ? AND context_key = ?", (user_id, context_key))
+    c.executemany(
+        """
+        INSERT INTO c2s_memory_schemas
+        (user_id, context_key, id, name, description, memory_ids, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                user_id,
+                context_key,
+                str(schema.get("id")),
+                schema.get("name", ""),
+                schema.get("description", ""),
+                json.dumps(schema.get("memory_ids") or [], ensure_ascii=False),
+                schema.get("created_at") or now,
+            )
+            for schema in context.get("schemas") or []
+            if schema.get("id")
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_project_memory_materialization(user_id: str, context_key: str, materialization: dict):
+    materialization_id = materialization.get("materialization_id")
+    if not materialization_id:
+        return
+    now = datetime.now().isoformat()
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT OR REPLACE INTO c2s_memory_materializations
+        (user_id, context_key, materialization_id, memories_included, query, outcome, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            context_key,
+            materialization_id,
+            json.dumps(materialization.get("memories_included") or [], ensure_ascii=False),
+            materialization.get("query", ""),
+            materialization.get("outcome"),
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def record_project_memory_activity(user_id: str, context_key: str, session_id: str, memory: dict):
+    raw_input_hash = memory.get("raw_input_hash")
+    if not raw_input_hash and not memory.get("delta_batch"):
+        return
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO c2s_memory_activity
+        (user_id, context_key, session_id, raw_input_hash, delta_batch, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            context_key,
+            session_id,
+            raw_input_hash,
+            json.dumps(memory.get("delta_batch") or {}, ensure_ascii=False),
+            datetime.now().isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _memory_item_to_row(user_id: str, context_key: str, item: dict, now: str) -> tuple:
+    return (
+        user_id,
+        context_key,
+        str(item.get("id")),
+        item.get("content", ""),
+        item.get("memory_type", "fact"),
+        item.get("section", "general"),
+        float(item.get("salience") or 0.5),
+        float(item.get("confidence") or 0.5),
+        json.dumps(item.get("embedding") or [], ensure_ascii=False),
+        item.get("source_session"),
+        item.get("source_agent"),
+        int(item.get("recall_count") or 0),
+        int(item.get("hit_count") or 0),
+        int(item.get("miss_count") or 0),
+        1 if item.get("is_active", True) else 0,
+        1 if item.get("is_archived", False) else 0,
+        item.get("created_at") or now,
+        item.get("updated_at") or now,
+    )
+
+
+def _memory_item_from_row(row) -> dict:
+    return {
+        "id": row[0],
+        "content": row[1] or "",
+        "memory_type": row[2] or "fact",
+        "section": row[3] or "general",
+        "salience": row[4] if row[4] is not None else 0.5,
+        "confidence": row[5] if row[5] is not None else 0.5,
+        "embedding": _json_list(row[6]),
+        "source_session": row[7],
+        "source_agent": row[8],
+        "recall_count": row[9] or 0,
+        "hit_count": row[10] or 0,
+        "miss_count": row[11] or 0,
+        "is_active": bool(row[12]),
+        "is_archived": bool(row[13]),
+        "created_at": row[14],
+        "updated_at": row[15],
+    }
+
+
+def _memory_schema_from_row(row) -> dict:
+    return {
+        "id": row[0],
+        "name": row[1] or "",
+        "description": row[2] or "",
+        "memory_ids": _json_list(row[3]),
+        "created_at": row[4],
+    }
+
+
+def _materialization_from_row(row) -> Optional[dict]:
+    if not row:
+        return None
+    return {
+        "materialization_id": row[0],
+        "memories_included": _json_list(row[1]),
+        "query": row[2] or "",
+        "outcome": row[3],
+    }
+
+
+def _json_list(value: Optional[str]) -> list:
+    if not value:
+        return []
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def _skill_from_record(row) -> Skill:

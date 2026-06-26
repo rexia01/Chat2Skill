@@ -45,7 +45,7 @@ def main() -> int:
         print()
         print("## Retrieval Metadata")
         print(f"- materialization_id={result.get('materialization_id')}")
-        print(f"- memory_bullets={len((result.get('memory') or {}).get('bullets_included') or [])}")
+        print(f"- memories={len((result.get('memory') or {}).get('memories_included') or [])}")
         print(f"- skills={', '.join((result.get('skills') or {}).get('skills_included') or [])}")
         return 0
 

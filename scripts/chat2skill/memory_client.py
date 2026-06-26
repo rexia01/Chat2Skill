@@ -1,7 +1,7 @@
 """Unified Memory backend adapter for Chat2Skill hooks.
 
 This adapter matches the stateless c2s-algorithm API:
-- local plugin storage owns memory state under ~/.chat2skill/contexts/
+- local plugin storage owns memory state in ~/.chat2skill/c2s.db
 - cloud API runs /v1/unified/learn and /v1/unified/retrieve
 - returned memory delta and skill updates are persisted locally by the plugin
 """
@@ -15,6 +15,7 @@ from . import api_client, storage
 from .config import llm_payload
 from .context_store import (
     apply_memory_result,
+    context_key,
     context_state,
     load_context,
     save_context,
@@ -98,6 +99,7 @@ def commit_transcript(
     memory = response.get("memory") or {}
     apply_memory_result(context, memory)
     context_path = save_context(project_dir, user_id, context)
+    storage.record_project_memory_activity(user_id, context_key(project_dir), session_id, memory)
 
     skill_status = _persist_skill_response(response.get("skills") or {}, user_id)
     return {
@@ -105,10 +107,10 @@ def commit_transcript(
         "backend": "memory",
         "memory": {
             "context_path": str(context_path),
-            "bullets_added": memory.get("bullets_added", 0),
-            "bullets_updated": memory.get("bullets_updated", 0),
-            "bullets_removed": memory.get("bullets_removed", 0),
-            "bullets_merged": memory.get("bullets_merged", 0),
+            "memories_added": memory.get("memories_added", 0),
+            "memories_updated": memory.get("memories_updated", 0),
+            "memories_removed": memory.get("memories_removed", 0),
+            "memories_merged": memory.get("memories_merged", 0),
             "reason": memory.get("reason"),
         },
         "skill": skill_status.get("skill"),

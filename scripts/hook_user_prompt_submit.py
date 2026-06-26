@@ -93,7 +93,7 @@ def inject_memory_context(
         materialization_id=result.get("materialization_id"),
         token_count=result.get("token_count"),
         coverage_score=(result.get("memory") or {}).get("coverage_score"),
-        memory_retrieved=len((result.get("memory") or {}).get("bullets_included") or []),
+        memory_retrieved=len((result.get("memory") or {}).get("memories_included") or []),
         skills=included_skills,
     )
     return 0
