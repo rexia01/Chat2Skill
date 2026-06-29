@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import io
 import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from chat2skill import memory_client, runner
 from chat2skill.context_store import apply_memory_result, load_context, save_context
 from chat2skill.models import MemoryItem, Skill
+import hook_user_prompt_submit
 import process_stop_queue
 
 
@@ -80,8 +83,60 @@ class MemoryClientTests(unittest.TestCase):
             self.assertIn("ec2-deploy-check", result["rendered_text"])
             self.assertEqual(context["last_materialization"]["materialization_id"], result["materialization_id"])
             self.assertEqual(context["last_materialization"]["memories_included"], ["b1"])
+            self.assertEqual(context["last_materialization"]["skills_included"], ["ec2-deploy-check"])
+            self.assertIn("Project deploys on EC2.", context["last_materialization"]["rendered_prompt"])
+            conn = sqlite3.connect(str(db_path))
+            row = conn.execute(
+                """
+                SELECT skills_included, rendered_prompt, token_count
+                FROM memory_materializations
+                WHERE materialization_id = ?
+                """,
+                (result["materialization_id"],),
+            ).fetchone()
+            conn.close()
+            self.assertEqual(json.loads(row[0]), ["ec2-deploy-check"])
+            self.assertIn("Project deploys on EC2.", row[1])
+            self.assertGreater(row[2], 0)
             self.assertTrue(db_path.exists())
             self.assertFalse(list(context_dir.rglob("*.json")))
+
+    def test_user_prompt_hook_records_final_injected_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
+            with patch.object(memory_client.storage, "DB_PATH", db_path):
+                with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                    memory_client.storage.init_db()
+                    result = {
+                        "materialization_id": "mat-hook",
+                        "rendered_text": "## Relevant Project Memories\n- [fact/project] Hook memory.",
+                        "token_count": 14,
+                        "memory": {"memories_included": ["m-hook"], "coverage_score": 1.0},
+                        "skills": {"skills_included": ["hook-skill"]},
+                    }
+                    with patch.object(hook_user_prompt_submit, "materialize_for_prompt", return_value=result):
+                        with redirect_stdout(io.StringIO()):
+                            code = hook_user_prompt_submit.inject_memory_context(
+                                _config(), "/repo/project", "user-1", "current prompt"
+                            )
+                    conn = sqlite3.connect(str(db_path))
+                    row = conn.execute(
+                        """
+                        SELECT rendered_prompt, skills_included, memories_included, query, token_count
+                        FROM memory_materializations
+                        WHERE materialization_id = 'mat-hook'
+                        """
+                    ).fetchone()
+                    conn.close()
+
+        self.assertEqual(code, 0)
+        self.assertIn("## Chat2Skill Memory and Skills", row[0])
+        self.assertIn("Materialization ID: mat-hook", row[0])
+        self.assertEqual(json.loads(row[1]), ["hook-skill"])
+        self.assertEqual(json.loads(row[2]), ["m-hook"])
+        self.assertEqual(row[3], "current prompt")
+        self.assertEqual(row[4], 14)
 
     def test_commit_transcript_calls_unified_learn_and_applies_memory_delta(self):
         with tempfile.TemporaryDirectory() as tmp:

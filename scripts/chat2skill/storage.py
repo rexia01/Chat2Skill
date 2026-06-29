@@ -156,6 +156,16 @@ def init_db():
     )
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS project_admin_state (
+            user_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'active',
+            archived_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS skill_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -218,11 +228,17 @@ def init_db():
             context_key TEXT NOT NULL,
             materialization_id TEXT PRIMARY KEY,
             memories_included TEXT,
+            skills_included TEXT,
             query TEXT,
+            rendered_prompt TEXT,
+            token_count INTEGER,
             outcome TEXT,
             created_at TEXT
         )
     """)
+    _ensure_column(c, "memory_materializations", "skills_included", "TEXT")
+    _ensure_column(c, "memory_materializations", "rendered_prompt", "TEXT")
+    _ensure_column(c, "memory_materializations", "token_count", "INTEGER")
     c.execute("""
         CREATE TABLE IF NOT EXISTS memory_activity (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1005,7 +1021,8 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
     ).fetchall()
     materialization_row = c.execute(
         """
-        SELECT materialization_id, memories_included, query, outcome
+        SELECT materialization_id, memories_included, skills_included, query,
+               rendered_prompt, token_count, outcome
         FROM memory_materializations
         WHERE user_id = ? AND context_key = ?
         ORDER BY created_at DESC
@@ -1103,15 +1120,19 @@ def save_project_memory_materialization(user_id: str, context_key: str, material
     c.execute(
         """
         INSERT OR REPLACE INTO memory_materializations
-        (user_id, context_key, materialization_id, memories_included, query, outcome, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (user_id, context_key, materialization_id, memories_included, skills_included,
+         query, rendered_prompt, token_count, outcome, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user_id,
             context_key,
             materialization_id,
             json.dumps(materialization.get("memories_included") or [], ensure_ascii=False),
+            json.dumps(materialization.get("skills_included") or [], ensure_ascii=False),
             materialization.get("query", ""),
+            materialization.get("rendered_prompt", ""),
+            materialization.get("token_count"),
             materialization.get("outcome"),
             now,
         ),
@@ -1205,8 +1226,11 @@ def _materialization_from_row(row) -> Optional[dict]:
     return {
         "materialization_id": row[0],
         "memories_included": _json_list(row[1]),
-        "query": row[2] or "",
-        "outcome": row[3],
+        "skills_included": _json_list(row[2]),
+        "query": row[3] or "",
+        "rendered_prompt": row[4] or "",
+        "token_count": row[5],
+        "outcome": row[6],
     }
 
 

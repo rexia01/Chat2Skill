@@ -219,6 +219,36 @@ For DeepSeek, write `~/.chat2skill/config.json` like this:
 These are the equivalent environment variables. You only need environment
 variables if you prefer shell config or need to override the JSON file.
 
+## Local Admin UI
+
+Chat2Skill includes a local-only management page for reviewing and managing
+stored project memory and skills.
+
+```bash
+python3 scripts/chat2skill_admin.py
+# opens http://127.0.0.1:8765 with a one-time local admin token
+```
+
+The admin server binds to `127.0.0.1` by default and reads/writes only the
+local `~/.chat2skill/c2s.db` database. It can:
+
+- list Chat2Skill projects discovered from the local database
+- view and rebuild the project-level `PROJECT_SKILL.md`
+- search, edit, archive, activate, and delete atomized skills
+- search, edit, archive, activate, and delete Engram-style project memories
+- inspect the source skill snapshot used for the current project skill version
+
+For frontend development, run the Vite shell separately:
+
+```bash
+cd admin/frontend
+npm install
+npm run dev
+```
+
+Keep the Python admin server running on `127.0.0.1:8765` while using the Vite
+dev server; Vite proxies `/api` requests to the Python backend.
+
 | Environment variable | JSON key | Default | Description |
 | --- | --- | --- | --- |
 | `CHAT2SKILL_API_URL` | `api_url` | `https://api.chat2skill.com` | Chat2Skill API endpoint used for stateless learn/extract calls. |

@@ -1,6 +1,12 @@
 {
   "version": "0.2",
   "words": [
-    "executescript"
+    "Chat2Skill",
+    "executescript",
+    "fastapi",
+    "REUSEADDR",
+    "unpkg",
+    "uvicorn",
+    "vite"
   ]
 }
